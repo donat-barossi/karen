@@ -22,7 +22,7 @@ asr:
   beam_size: 3
   vad_filter: false
   condition_on_previous_text: false
-  initial_prompt: "Karen, assistente vocale italiano. Comandi su ora, meteo, luci, timer."
+  initial_prompt: "Che ore sono. Che tempo fa. Accendi le luci. Timer cinque minuti."
 
 llm:
   model_path: "phi3-mini-4k-q4_k_m.gguf"

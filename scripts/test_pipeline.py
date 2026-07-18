@@ -52,7 +52,7 @@ async def test_text(pipeline: KarenPipeline, text_it: str) -> None:
     if intent_data is None:
         raw_response = pipeline.llm.generate(text_it)
         print(f"[LLM RAW] {raw_response}")
-        intent_data = pipeline._parse_intent(raw_response)
+        intent_data = pipeline._parse_intent(raw_response, text_it)
     else:
         print(f"[FAST-PATH] intent={intent_data.get('intent')}")
 

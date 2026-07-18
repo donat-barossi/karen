@@ -92,7 +92,7 @@ class KarenPipeline:
         else:
             raw_response = await asyncio.to_thread(self.llm.generate, text_it)
             log.info("LLM → '%s'  (%.2f s)", raw_response[:120], time.monotonic() - t_llm)
-            intent_data = self._parse_intent(raw_response)
+            intent_data = self._parse_intent(raw_response, text_it)
 
         t_skill = time.monotonic()
         response_it = await self.skills.execute(intent_data)
@@ -115,19 +115,29 @@ class KarenPipeline:
         pcm = resample_pcm16(pcm, self.tts.sample_rate, ESP32_SAMPLE_RATE)
         return normalize_pcm16(pcm)
 
+    def _normalize_user_text(self, text: str) -> str:
+        t = text.lower().strip()
+        for wake in ("hey kira", "ehi kira", "hey karen", "ehi karen", "karen"):
+            t = t.replace(wake, " ")
+        t = re.sub(r"[^\w\s']", " ", t)
+        return re.sub(r"\s+", " ", t).strip()
+
+    def _looks_like_time_query(self, text: str) -> bool:
+        t = self._normalize_user_text(text)
+        collapsed = t.replace(" ", "")
+        if any(p in t for p in ("che ore", "che ora", "dimmi l'ora", "ora sono")):
+            return True
+        if any(token in collapsed for token in ("orisono", "oresono", "orasono", "orae sono")):
+            return True
+        return bool(re.search(r"(che\s*)?or[aei]{1,2}\s*sono", t))
+
     def _fast_intent(self, text: str) -> dict[str, Any] | None:
         """
         Bypass LLM per comandi frequenti: più veloce e risposta sempre in italiano.
         """
-        t = text.lower().strip()
-        for wake in ("hey kira", "ehi kira", "hey karen", "ehi karen", "karen"):
-            t = t.replace(wake, "").strip(" ,.")
+        t = self._normalize_user_text(text)
 
-        if any(p in t for p in ("che ore", "che ora", "dimmi l'ora", "ora sono")):
-            return self._intent("time")
-
-        # Errori ASR frequenti su "che ore sono"
-        if re.search(r"\bor[aei]\b.*\bsono\b", t) or "ori sono" in t:
+        if self._looks_like_time_query(text):
             return self._intent("time")
 
         if any(p in t for p in ("che giorno", "che data", "data di oggi", "data è oggi")):
@@ -140,7 +150,7 @@ class KarenPipeline:
             }
 
         greetings = ("ciao", "salve", "buongiorno", "buonasera", "come stai")
-        if t in greetings or t.startswith("ciao ") and len(t) < 24:
+        if t in greetings or (t.startswith("ciao ") and len(t) < 24):
             return {
                 **self._intent("general"),
                 "response_it": "Ciao! Sono Karen, come posso aiutarti?",
@@ -158,28 +168,43 @@ class KarenPipeline:
             "ha_entity": None,
         }
 
-    def _parse_intent(self, raw: str) -> dict[str, Any]:
+    def _parse_intent(self, raw: str, text_it: str = "") -> dict[str, Any]:
         """Estrae il JSON dall'output LLM (tollera testo extra)."""
         raw = raw.strip()
-        # Cerca il blocco JSON
         start = raw.find("{")
         end = raw.rfind("}") + 1
         if start == -1 or end == 0:
             log.warning("LLM non ha restituito JSON valido: %s", raw[:200])
+            if text_it:
+                fb = self._fast_intent(text_it)
+                if fb:
+                    return fb
             return {
                 "intent": "general",
                 "parameters": {},
                 "response_it": "Non ho capito bene. Puoi ripetere?",
             }
         try:
-            return json.loads(raw[start:end])
+            data = json.loads(raw[start:end])
         except json.JSONDecodeError as e:
             log.warning("JSON parse error: %s | raw: %s", e, raw[:200])
+            if text_it:
+                fb = self._fast_intent(text_it)
+                if fb:
+                    return fb
             return {
                 "intent": "general",
                 "parameters": {},
                 "response_it": "Non ho capito. Puoi ripetere?",
             }
+
+        intent = data.get("intent")
+        if not intent or intent in ("unknown", "general"):
+            if text_it:
+                fb = self._fast_intent(text_it)
+                if fb:
+                    return fb
+        return data
 
     async def shutdown(self) -> None:
         log.info("Pipeline: shutdown")
