@@ -37,10 +37,19 @@ Utente: che ore sono
 {"intent":"time","parameters":{},"response_it":"[SKILL_WILL_FILL]","ha_service":null,"ha_entity":null}
 
 Utente: imposta un timer di cinque minuti
-{"intent":"timer","parameters":{"duration_s":300},"response_it":"Timer di 5 minuti avviato!","ha_service":null,"ha_entity":null}
+{"intent":"timer","parameters":{"action":"start","duration_s":300},"response_it":"Timer di 5 minuti avviato!","ha_service":null,"ha_entity":null}
+
+Utente: annulla tutti i timer
+{"intent":"timer","parameters":{"action":"cancel","all":true},"response_it":"Timer annullati.","ha_service":null,"ha_entity":null}
 
 Utente: sveglia alle sette e mezza
-{"intent":"alarm","parameters":{"hour":7,"minute":30},"response_it":"Sveglia impostata per le 07:30!","ha_service":null,"ha_entity":null}
+{"intent":"alarm","parameters":{"action":"set","hour":7,"minute":30,"days":[0,1,2,3,4,5,6]},"response_it":"Sveglia impostata per le 07:30!","ha_service":null,"ha_entity":null}
+
+Utente: sveglia alle sette lunedì mercoledì e venerdì
+{"intent":"alarm","parameters":{"action":"set","hour":7,"minute":0,"days":[0,2,4],"name":"lun-mer-ven"},"response_it":"Sveglia lun-mer-ven alle 07:00.","ha_service":null,"ha_entity":null}
+
+Utente: domani non suonare la sveglia
+{"intent":"alarm","parameters":{"action":"skip_tomorrow"},"response_it":"Ok, domani non suonerà.","ha_service":null,"ha_entity":null}
 
 Utente: cosa ho in calendario domani
 {"intent":"calendar_query","parameters":{"when":"tomorrow"},"response_it":"[SKILL_WILL_FILL]","ha_service":null,"ha_entity":null}

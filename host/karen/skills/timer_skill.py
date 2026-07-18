@@ -1,147 +1,158 @@
-"""Skill: timer e sveglie (delegati a Home Assistant)."""
+"""Skill: timer multipli e sveglie ricorrenti."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Any
 
-from ..ha_client import HomeAssistantClient
+from ..scheduling.service import ScheduleService, fmt_days, fmt_duration, parse_weekdays
 from .base import BaseSkill
 
 log = logging.getLogger(__name__)
 
+ITALIAN_NUMBERS: dict[str, int] = {
+    "un": 1, "una": 1, "uno": 1,
+    "due": 2, "tre": 3, "quattro": 4, "cinque": 5,
+    "sei": 6, "sette": 7, "otto": 8, "nove": 9, "dieci": 10,
+    "undici": 11, "dodici": 12, "quindici": 15, "venti": 20,
+    "trenta": 30, "quaranta": 40, "cinquanta": 50, "sessanta": 60,
+}
 
-def _fmt_duration(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds} secondi"
-    if seconds < 3600:
-        m, s = divmod(seconds, 60)
-        out = f"{m} minut{'o' if m == 1 else 'i'}"
-        return out + (f" e {s} secondi" if s else "")
-    h, rem = divmod(seconds, 3600)
-    m = rem // 60
-    out = f"{h} or{'a' if h == 1 else 'e'}"
-    return out + (f" e {m} minuti" if m else "")
+_NUM_WORD = (
+    r"\d+|un[ao]?|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|"
+    r"undici|dodici|quindici|venti|trenta|quaranta|cinquanta|sessanta"
+)
 
 
-def _duration_hms(seconds: int) -> str:
-    h, rem = divmod(max(1, seconds), 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
+def _italian_number(token: str) -> int | None:
+    token = token.lower().strip()
+    if token.isdigit():
+        return int(token)
+    return ITALIAN_NUMBERS.get(token)
 
 
 class TimerSkill(BaseSkill):
+
+    def __init__(self, cfg: dict) -> None:
+        super().__init__(cfg)
+        self._sched: ScheduleService | None = cfg.get("schedule_service")
 
     @property
     def handled_intents(self) -> list[str]:
         return ["timer", "alarm"]
 
+    def _sched_svc(self) -> ScheduleService:
+        if self._sched is None:
+            raise RuntimeError("ScheduleService non inizializzato")
+        return self._sched
+
     async def execute(self, intent_data: dict[str, Any]) -> str:
         intent = intent_data.get("intent")
         params = intent_data.get("parameters", {})
-        ha_cfg = self._cfg.get("ha", {})
-        ha = HomeAssistantClient(ha_cfg)
-        entities = ha_cfg.get("entities", {})
-        timer_entity = entities.get("timer", "timer.karen")
-        alarm_entity = entities.get("alarm", "input_datetime.karen_alarm")
-        active_entity = entities.get("active", "input_boolean.karen_active")
+        sched = self._sched_svc()
 
         if intent == "timer":
             action = params.get("action", "start")
-            if action == "cancel":
-                ok = await ha.call_service("timer.cancel", entity_id=timer_entity)
-                return "Timer annullato." if ok else "Non riesco ad annullare il timer."
 
-            if action == "status":
-                state = await ha.get_state(timer_entity)
-                if not state:
-                    return "Non riesco a leggere lo stato del timer."
-                attrs = state.get("attributes", {})
-                remaining = attrs.get("remaining", state.get("state", ""))
-                if remaining in ("0", "idle", "unknown", "unavailable"):
-                    return "Non c'è nessun timer attivo."
-                return f"Il timer ha ancora {remaining}."
+            if action in ("list", "status"):
+                return sched.describe_timers()
+
+            if action == "cancel":
+                n = sched.cancel_timers(
+                    name=params.get("name", ""),
+                    timer_id=params.get("timer_id", ""),
+                    cancel_all=bool(params.get("all")),
+                )
+                if n == 0:
+                    return "Non ho trovato timer da annullare."
+                if n == 1:
+                    return "Timer annullato."
+                return f"{n} timer annullati."
 
             duration_s = int(params.get("duration_s", params.get("duration", 60)))
-            ok = await ha.call_service(
-                "timer.start",
-                entity_id=timer_entity,
-                duration=_duration_hms(duration_s),
-            )
-            label = _fmt_duration(duration_s)
-            if ok:
-                return f"Timer di {label} avviato!"
-            asyncio.ensure_future(self._local_timer(duration_s))
-            return f"Timer di {label} avviato localmente."
+            name = params.get("name", "")
+            sched.start_timer(duration_s, name=name)
+            label = fmt_duration(duration_s)
+            return f"Ok, {label} a partire da adesso."
 
         if intent == "alarm":
             action = params.get("action", "set")
-            if action in ("status", "query"):
-                state = await ha.get_state(alarm_entity)
-                if not state:
-                    return "Non riesco a leggere la sveglia."
-                raw = state.get("state", "")
-                if raw in ("unknown", "unavailable"):
-                    return "La sveglia non è configurata."
-                if "T" in raw:
-                    raw = raw.split("T", 1)[1]
-                parts = raw.split(":")
-                if len(parts) >= 2:
-                    return f"La sveglia è impostata per le {int(parts[0]):02d}:{int(parts[1]):02d}."
-                return f"La sveglia è impostata per le {raw[:5]}."
 
-            if action == "cancel":
-                await ha.call_service(
-                    "input_boolean.turn_off",
-                    entity_id=active_entity,
+            if action in ("list", "status", "query"):
+                return sched.describe_alarms()
+
+            if action in ("skip_tomorrow", "skip"):
+                n = sched.skip_tomorrow(params.get("alarm_id", ""))
+                if n == 0:
+                    return "Domani non hai sveglie programmate da saltare."
+                if n == 1:
+                    return "Ok, domani non suonerà la sveglia. La ricorrenza resta attiva."
+                return f"Ok, domani non suoneranno {n} sveglie. Le ricorrenze restano attive."
+
+            if action == "skip_next":
+                n = sched.skip_next(params.get("alarm_id", ""))
+                if n == 0:
+                    return "Non ho sveglie da saltare."
+                return "Ok, salto la prossima occorrenza. La ricorrenza resta attiva."
+
+            if action in ("cancel", "disable"):
+                ok = sched.disable_alarm(
+                    alarm_id=params.get("alarm_id", ""),
+                    name=params.get("name", ""),
                 )
-                return "Sveglia disattivata."
+                return "Sveglia disattivata." if ok else "Non ho trovato la sveglia."
 
             hour = int(params.get("hour", 7))
             minute = int(params.get("minute", 0))
-            ok = await ha.call_service(
-                "input_datetime.set_datetime",
-                entity_id=alarm_entity,
-                time=f"{hour:02d}:{minute:02d}:00",
+            days = params.get("days")
+            if isinstance(days, list) and days:
+                day_list = [int(d) for d in days]
+            else:
+                day_list = list(range(7))
+
+            alarm = sched.upsert_alarm(
+                hour, minute, day_list,
+                name=params.get("name", ""),
+                alarm_id=params.get("alarm_id", ""),
             )
-            if ok:
-                await ha.call_service("input_boolean.turn_on", entity_id=active_entity)
-                return f"Sveglia impostata per le {hour:02d}:{minute:02d}!"
-            return "Non riesco a impostare la sveglia. Controlla Home Assistant."
+            when = f"{hour:02d}:{minute:02d}"
+            return (
+                f"Sveglia {alarm['name']} impostata per le {when}, "
+                f"{fmt_days(day_list)}."
+            )
 
         return intent_data.get("response_it", "Comando non riconosciuto.")
 
-    @staticmethod
-    async def _local_timer(seconds: int) -> None:
-        log.info("Timer locale avviato: %d s", seconds)
-        await asyncio.sleep(seconds)
-        log.info("Timer scaduto! (%d s)", seconds)
-
 
 def parse_timer_duration(text: str) -> int | None:
-    """Estrae durata timer da testo italiano (secondi)."""
     t = text.lower()
-    if "timer" not in t and "sveglia" in t:
+    if "sveglia" in t and "timer" not in t:
+        return None
+    if not any(w in t for w in ("timer", "minut", "second", "or")):
         return None
 
-    m = re.search(r"(\d+)\s*(?:minut[oi]|min\b)", t)
+    m = re.search(rf"({_NUM_WORD})\s*(?:minut[oi]|minutes?|min\b)", t)
     if m:
-        return int(m.group(1)) * 60
-    m = re.search(r"(\d+)\s*(?:second[oi]|sec\b)", t)
+        n = _italian_number(m.group(1))
+        if n is not None:
+            return n * 60
+    m = re.search(rf"({_NUM_WORD})\s*(?:second[oi]|sec\b)", t)
     if m:
-        return int(m.group(1))
-    m = re.search(r"(\d+)\s*(?:or[ae]|h\b)", t)
+        n = _italian_number(m.group(1))
+        if n is not None:
+            return n
+    m = re.search(rf"({_NUM_WORD})\s*(?:or[ae]|h\b)", t)
     if m:
-        return int(m.group(1)) * 3600
+        n = _italian_number(m.group(1))
+        if n is not None:
+            return n * 3600
     return None
 
 
 def parse_alarm_time(text: str) -> tuple[int, int] | None:
-    """Estrae ora sveglia da testo italiano."""
     t = text.lower()
-    if not any(w in t for w in ("sveglia", "alarm", "svegliami")):
+    if not any(w in t for w in ("sveglia", "svegliami")):
         return None
 
     m = re.search(r"(\d{1,2})[:.](\d{2})", t)
@@ -164,6 +175,53 @@ def parse_alarm_time(text: str) -> tuple[int, int] | None:
         "dieci": 10, "undici": 11, "dodici": 12,
     }
     for w, h in words.items():
-        if w in t and ("sveglia" in t or "svegliami" in t):
+        if w in t:
             return h, 0
     return None
+
+
+def parse_alarm_intent(text: str) -> dict[str, Any] | None:
+    t = text.lower()
+    if any(p in t for p in ("domani non suonare", "non suonare domani", "salta domani", "salta la sveglia domani")):
+        return {"intent": "alarm", "parameters": {"action": "skip_tomorrow"}}
+
+    if any(p in t for p in ("salta prossima", "prossima sveglia", "salta la prossima")):
+        return {"intent": "alarm", "parameters": {"action": "skip_next"}}
+
+    if any(p in t for p in ("quali sveglie", "mostra sveglie", "sveglie attive")):
+        return {"intent": "alarm", "parameters": {"action": "list"}}
+
+    time = parse_alarm_time(t)
+    if time is None:
+        return None
+    hour, minute = time
+    days = parse_weekdays(t) or list(range(7))
+    name = ""
+    if "lavoro" in t or "feriali" in t:
+        name = "feriali"
+    elif days == [0, 2, 4]:
+        name = "lun-mer-ven"
+    elif days == [1, 3]:
+        name = "mar-gio"
+    return {
+        "intent": "alarm",
+        "parameters": {"action": "set", "hour": hour, "minute": minute, "days": days, "name": name},
+    }
+
+
+def parse_timer_intent(text: str) -> dict[str, Any] | None:
+    t = text.lower()
+    if any(p in t for p in ("annulla timer", "cancella timer", "ferma timer", "stop timer")):
+        cancel_all = "tutti" in t
+        return {"intent": "timer", "parameters": {"action": "cancel", "all": cancel_all}}
+
+    if any(p in t for p in ("quali timer", "timer attivi", "mostra timer")):
+        return {"intent": "timer", "parameters": {"action": "list"}}
+
+    duration = parse_timer_duration(t)
+    if duration is None:
+        return None
+    name = ""
+    if "pasta" in t:
+        name = "pasta"
+    return {"intent": "timer", "parameters": {"action": "start", "duration_s": duration, "name": name}}

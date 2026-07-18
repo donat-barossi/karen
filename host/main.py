@@ -53,6 +53,12 @@ async def main() -> None:
         stream_cfg=transport_cfg.get("upload_stream"),
     )
 
+    async def voice_announce(message: str) -> None:
+        pcm = await asyncio.to_thread(pipeline._synthesize_phrase, message)
+        await server.send_audio(pcm)
+
+    pipeline.set_voice_announce(voice_announce)
+
     log.info(
         "Server UDP in ascolto su %s:%d → ESP32 %s:%d",
         transport_cfg["listen_host"],

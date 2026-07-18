@@ -20,11 +20,18 @@ from typing import Any
 
 from .audio_util import normalize_pcm16, resample_pcm16, trim_silence_pcm16
 
+from .scheduling import ScheduleService
+from .scheduling.service import parse_weekdays
 from .asr import WhisperASR
 from .llm import LLMEngine
 from .tts import PiperTTS
 from .skills import SkillRegistry
-from .skills.timer_skill import parse_alarm_time, parse_timer_duration
+from .skills.timer_skill import (
+    parse_alarm_intent,
+    parse_alarm_time,
+    parse_timer_duration,
+    parse_timer_intent,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +53,9 @@ class KarenPipeline:
         self._cfg = cfg
         models_dir = Path(__file__).parent.parent / "models"
 
+        self._schedule = ScheduleService(cfg)
+        cfg["schedule_service"] = self._schedule
+
         self.asr = WhisperASR(cfg["asr"], models_dir)
         self.llm = LLMEngine(cfg["llm"], models_dir)
         self.tts = PiperTTS(cfg["tts"], models_dir)
@@ -65,10 +75,14 @@ class KarenPipeline:
         self.tts.load()
         log.info("  ✓ TTS (Piper)")
 
+        await self._schedule.start()
         await self.skills.initialize()
         log.info("  ✓ Skills")
 
         log.info("Modelli pronti in %.1f s", time.monotonic() - t0)
+
+    def set_voice_announce(self, callback: Any) -> None:
+        self._schedule.set_voice_announce(callback)
 
     async def process(self, audio_pcm16: bytes) -> bytes:
         """Pipeline completa; ASR/LLM/TTS in thread pool, skills async."""
@@ -152,14 +166,26 @@ class KarenPipeline:
                 "parameters": {"when": "today"},
             }
 
+        timer_intent = parse_timer_intent(t)
+        if timer_intent is not None:
+            return timer_intent
+
+        alarm_intent = parse_alarm_intent(t)
+        if alarm_intent is not None:
+            return alarm_intent
+
         duration = parse_timer_duration(t)
         if duration is not None:
-            return {**self._intent("timer"), "parameters": {"duration_s": duration}}
+            return {**self._intent("timer"), "parameters": {"duration_s": duration, "action": "start"}}
 
         alarm = parse_alarm_time(t)
         if alarm is not None:
             h, m = alarm
-            return {**self._intent("alarm"), "parameters": {"hour": h, "minute": m}}
+            days = parse_weekdays(t) or list(range(7))
+            return {
+                **self._intent("alarm"),
+                "parameters": {"action": "set", "hour": h, "minute": m, "days": days},
+            }
 
         if any(p in t for p in ("calendario", "agenda", "appuntament")):
             when = "tomorrow" if "domani" in t else "today"
@@ -220,8 +246,55 @@ class KarenPipeline:
                 fb = self._fast_intent(text_it)
                 if fb:
                     return fb
+            normalized = self._normalize_llm_intent(data, text_it)
+            if normalized.get("intent"):
+                return normalized
+
+        if not data.get("intent"):
+            log.warning("Intent mancante dopo LLM: %s | testo=%r", data, text_it)
+            if text_it:
+                fb = self._fast_intent(text_it)
+                if fb:
+                    return fb
+            return {
+                "intent": "general",
+                "parameters": {},
+                "response_it": "Non ho capito. Puoi ripetere?",
+            }
+        return data
+
+    def _normalize_llm_intent(self, data: dict[str, Any], text_it: str) -> dict[str, Any]:
+        """Recupera intent da JSON LLM malformato (es. action/action_params)."""
+        if data.get("intent"):
+            return data
+
+        t = self._normalize_user_text(text_it)
+        action = str(data.get("action", "")).lower()
+        params = data.get("parameters") or data.get("action_params") or {}
+
+        if action in ("start", "cancel", "list") or "timer" in t or "minut" in t:
+            if action == "cancel" or any(p in t for p in ("annulla", "cancella", "ferma")):
+                return {
+                    **self._intent("timer"),
+                    "parameters": {"action": "cancel", "all": "tutti" in t},
+                }
+            if action == "list" or any(p in t for p in ("quali timer", "timer attivi")):
+                return {**self._intent("timer"), "parameters": {"action": "list"}}
+
+            duration = parse_timer_duration(t)
+            if duration is None and isinstance(params.get("timer_duration"), str):
+                duration = parse_timer_duration(params["timer_duration"])
+            if duration is None and isinstance(params.get("duration_s"), (int, float)):
+                duration = int(params["duration_s"])
+            if duration is not None:
+                return {
+                    **self._intent("timer"),
+                    "parameters": {"action": "start", "duration_s": duration},
+                }
+
         return data
 
     async def shutdown(self) -> None:
         log.info("Pipeline: shutdown")
+        await self._schedule.stop()
         await self.skills.shutdown()

@@ -44,6 +44,9 @@ temp_audio/
 *.log
 logs/
 
+# Dati runtime Karen (sveglie/timer locali)
+host/data/
+
 # OS
 .DS_Store
 Thumbs.db

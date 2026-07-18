@@ -215,6 +215,10 @@ class AudioServer:
             return False
         return stream.silence_ms() >= self._vad_silence_ms
 
+    async def send_audio(self, audio_pcm16: bytes) -> None:
+        """Invia audio TTS all'ESP32 (es. scadenza timer)."""
+        await self._send_audio_response(audio_pcm16)
+
     async def _process_and_respond(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16:
             log.warning("Upload stream vuoto, ignorato")

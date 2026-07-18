@@ -19,6 +19,7 @@ ha:
     timer: timer.karen
     alarm: input_datetime.karen_alarm
     active: input_boolean.karen_active
+    announce_script: script.karen_announce
   calendar:
     entity_id: calendar.outlook   # dopo integrazione Outlook in HA
     reminder_minutes: 15
@@ -56,3 +57,6 @@ weather:
 logging:
   level: "INFO"
   file: null              # systemd scrive già su host/karen.log
+
+schedule:
+  data_dir: "data"        # host/data/schedules.json (timer e sveglie multipli)
