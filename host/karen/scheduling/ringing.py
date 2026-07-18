@@ -91,20 +91,29 @@ class RingController:
 
     async def _loop(self, message: str) -> None:
         assert self._transport is not None
+        server = self._transport
         try:
-            await self._transport.start_ring()
+            await server.start_ring()
             while self._active:
-                play_s = await self._transport.send_ring_audio(message)
+                play_s = await server.send_ring_audio(message)
+                if not self._active or self._dismiss_event.is_set():
+                    break
+
                 listen_timeout = self._listen_s + play_s + 1.0
-                self._dismiss_event.clear()
                 try:
                     await asyncio.wait_for(self._dismiss_event.wait(), timeout=listen_timeout)
                     break
                 except asyncio.TimeoutError:
                     pass
-                if not self._active:
+
+                if not self._active or self._dismiss_event.is_set():
                     break
-                await asyncio.sleep(self._interval_s)
+
+                # Pausa tra ripetizioni, interrompibile dal dismiss
+                for _ in range(int(self._interval_s * 10)):
+                    if not self._active or self._dismiss_event.is_set():
+                        break
+                    await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             pass
         finally:
@@ -113,10 +122,15 @@ class RingController:
                 await self._transport.stop_ring()
             log.info("Ring terminato (%s)", self._kind)
 
+    async def acknowledge_dismiss(self) -> None:
+        if self._transport is None:
+            return
+        await self._transport.send_ring_audio(self._dismiss_ack)
+
     def notify_dismiss_from_asr(self, text: str) -> bool:
         if not self._active or not is_dismiss_phrase(text):
             return False
         log.info("Dismiss riconosciuto (senza wake word): %r", text)
-        self._dismiss_event.set()
         self._active = False
+        self._dismiss_event.set()
         return True
