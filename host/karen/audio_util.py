@@ -31,3 +31,47 @@ def normalize_pcm16(pcm: bytes, target_peak: float = 0.9) -> bytes:
         return pcm
     out = np.clip(samples * scale, -32768, 32767).astype(np.int16)
     return out.tobytes()
+
+
+def trim_silence_pcm16(
+    pcm: bytes,
+    sample_rate: int = 16000,
+    frame_ms: int = 20,
+    threshold: int = 350,
+    padding_ms: int = 250,
+) -> bytes:
+    """Taglia silenzio iniziale/finale per ASR più veloce su registrazioni lunghe."""
+    if len(pcm) < 4:
+        return pcm
+
+    frame_bytes = max(2, (sample_rate * frame_ms // 1000) * 2)
+    pad_bytes = (sample_rate * padding_ms // 1000) * 2
+    n_frames = len(pcm) // frame_bytes
+    if n_frames < 2:
+        return pcm
+
+    first = 0
+    for i in range(n_frames):
+        chunk = pcm[i * frame_bytes : (i + 1) * frame_bytes]
+        if audioop.rms(chunk, 2) >= threshold:
+            first = i
+            break
+
+    last = n_frames - 1
+    for i in range(n_frames - 1, first - 1, -1):
+        chunk = pcm[i * frame_bytes : (i + 1) * frame_bytes]
+        if audioop.rms(chunk, 2) >= threshold:
+            last = i
+            break
+
+    start = max(0, first * frame_bytes - pad_bytes)
+    end = min(len(pcm), (last + 1) * frame_bytes + pad_bytes)
+    trimmed = pcm[start:end]
+
+    if len(trimmed) < len(pcm):
+        log.debug(
+            "Audio trim: %.2f s → %.2f s",
+            len(pcm) / (sample_rate * 2),
+            len(trimmed) / (sample_rate * 2),
+        )
+    return trimmed

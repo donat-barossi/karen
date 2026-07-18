@@ -53,9 +53,11 @@
 #define WAKEWORD_MODEL_NAME "wn9_heykira_tts3"
 
 // ── VAD – rilevamento fine frase ─────────────────────────────────────────────
-#define VAD_SILENCE_THRESHOLD   300
-#define VAD_SILENCE_MS          1800
-#define VAD_MAX_RECORD_MS       8000
+#define VAD_SPEECH_THRESHOLD    700
+#define VAD_SILENCE_THRESHOLD   380
+#define VAD_SILENCE_MS          1000
+#define VAD_MIN_SPEECH_MS       350
+#define VAD_MAX_RECORD_MS       4500
 
 #define RESPONSE_FIRST_TIMEOUT_MS  90000
 #define RESPONSE_CHUNK_TIMEOUT_MS  3000

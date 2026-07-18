@@ -274,6 +274,7 @@ static void audio_main_task(void *arg)
     uint16_t seq         = 0;
     uint32_t silence_ms  = 0;
     uint32_t record_ms   = 0;
+    bool     had_speech  = false;
     uint32_t btn_held_ms = 0;
     const uint32_t frame_ms = ((uint32_t)read_samples * 1000) / AUDIO_SAMPLE_RATE;
 
@@ -340,9 +341,10 @@ static void audio_main_task(void *arg)
 #endif
                 udp_response_arm();
                 karen_note_state(STATE_LISTENING);
-                seq        = 0;
-                silence_ms = 0;
-                record_ms  = 0;
+                seq         = 0;
+                silence_ms  = 0;
+                record_ms   = 0;
+                had_speech  = false;
             }
             break;
         }
@@ -367,15 +369,24 @@ static void audio_main_task(void *arg)
             record_ms += frame_ms;
 
             uint32_t rms = compute_rms(mono_frame, (size_t)n);
-            if (rms < VAD_SILENCE_THRESHOLD)
+            if (rms >= VAD_SPEECH_THRESHOLD)
+                had_speech = true;
+
+            if (had_speech && rms < VAD_SILENCE_THRESHOLD)
                 silence_ms += frame_ms;
             else
                 silence_ms = 0;
 
-            if (silence_ms >= VAD_SILENCE_MS || record_ms >= VAD_MAX_RECORD_MS) {
+            bool min_speech_ok = record_ms >= VAD_MIN_SPEECH_MS;
+            bool end_on_silence = had_speech && min_speech_ok &&
+                                  silence_ms >= VAD_SILENCE_MS;
+            bool end_on_max = record_ms >= VAD_MAX_RECORD_MS;
+
+            if (end_on_silence || end_on_max) {
                 udp_send_end_of_audio();
-                ESP_LOGI(TAG, "Fine registrazione (silenzio=%lums, tot=%lums)",
-                         silence_ms, record_ms);
+                ESP_LOGI(TAG,
+                         "Fine registrazione (speech=%d sil=%lums tot=%lums)",
+                         had_speech, silence_ms, record_ms);
                 karen_note_state(STATE_WAITING_RESPONSE);
             }
             break;

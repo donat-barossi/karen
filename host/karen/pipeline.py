@@ -18,7 +18,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .audio_util import normalize_pcm16, resample_pcm16
+from .audio_util import normalize_pcm16, resample_pcm16, trim_silence_pcm16
 
 from .asr import WhisperASR
 from .llm import LLMEngine
@@ -72,6 +72,8 @@ class KarenPipeline:
     async def process(self, audio_pcm16: bytes) -> bytes:
         """Pipeline completa; ASR/LLM/TTS in thread pool, skills async."""
         t_start = time.monotonic()
+
+        audio_pcm16 = trim_silence_pcm16(audio_pcm16, ESP32_SAMPLE_RATE)
 
         text_it = await asyncio.to_thread(
             lambda: _clean_transcript(self.asr.transcribe(audio_pcm16))
