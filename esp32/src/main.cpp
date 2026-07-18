@@ -381,12 +381,19 @@ static void audio_main_task(void *arg)
             bool end_on_silence = had_speech && min_speech_ok &&
                                   silence_ms >= VAD_SILENCE_MS;
             bool end_on_max = record_ms >= VAD_MAX_RECORD_MS;
+            bool end_on_host = udp_response_packets_received() > 0;
 
-            if (end_on_silence || end_on_max) {
+            if (end_on_silence || end_on_max || end_on_host) {
                 udp_send_end_of_audio();
-                ESP_LOGI(TAG,
-                         "Fine registrazione (speech=%d sil=%lums tot=%lums)",
-                         had_speech, silence_ms, record_ms);
+                if (end_on_host) {
+                    ESP_LOGI(TAG,
+                             "Fine registrazione (host ha risposto, tot=%lums)",
+                             record_ms);
+                } else {
+                    ESP_LOGI(TAG,
+                             "Fine registrazione (speech=%d sil=%lums tot=%lums)",
+                             had_speech, silence_ms, record_ms);
+                }
                 karen_note_state(STATE_WAITING_RESPONSE);
             }
             break;
@@ -446,5 +453,6 @@ extern "C" void app_main(void)
                             NULL, 3, NULL, 1);
 
     karen_note_state(STATE_IDLE);
-    ESP_LOGI(TAG, "Karen pronta (supervisor attivo).");
+    ESP_LOGI(TAG, "Karen pronta (VAD max=%dms, sil=%dms, speech=%d).",
+             VAD_MAX_RECORD_MS, VAD_SILENCE_MS, VAD_SPEECH_THRESHOLD);
 }

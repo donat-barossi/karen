@@ -7,7 +7,7 @@ transport:
   esp32_port: 7002
   upload_stream:
     vad_threshold: 300
-    vad_silence_ms: 0       # 0 = attendi END_AUDIO dall'ESP32 (VAD solo lato ESP)
+    vad_silence_ms: 600     # chiudi upload e processa prima dell'END ESP (RX già armato)
     min_duration_s: 0.5
 
 ha:
