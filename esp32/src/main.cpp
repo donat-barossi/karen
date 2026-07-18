@@ -4,6 +4,7 @@
  *
  * Macchina a stati:
  *   IDLE → LISTENING → WAITING_RESPONSE → SPEAKING → IDLE
+ *   IDLE → (START_RING) → WAITING_RESPONSE → SPEAKING → RINGING → …
  */
 
 #include <string.h>
@@ -30,6 +31,7 @@ typedef enum {
     STATE_LISTENING,
     STATE_WAITING_RESPONSE,
     STATE_SPEAKING,
+    STATE_RINGING,
 } karen_state_t;
 
 static volatile karen_state_t s_state = STATE_IDLE;
@@ -59,11 +61,12 @@ static void karen_force_idle(const char *reason)
     karen_state_t prev = s_state;
     ESP_LOGW(TAG, "Recovery → IDLE (%s)", reason);
     s_session_abort = true;
-    if (prev == STATE_LISTENING)
+    if (prev == STATE_LISTENING || prev == STATE_RINGING)
         udp_send_end_of_audio();
     i2s_spk_end_playback();
     udp_response_reset();
     udp_response_disarm();
+    audio_board_set_duplex_mic(false);
     if (s_ww_available) {
         wake_word_set_active(true);
         wake_word_reset();
@@ -158,8 +161,26 @@ static void supervisor_task(void *arg)
             if (karen_state_elapsed_ms() > STATE_SPEAKING_MAX_MS)
                 karen_force_idle("timeout SPEAKING");
             break;
+        case STATE_RINGING:
+            if (karen_state_elapsed_ms() > STATE_RINGING_MAX_MS)
+                karen_force_idle("timeout RINGING");
+            break;
         default:
             break;
+        }
+
+        if (udp_ring_stop_pending()) {
+            udp_ring_clear_stop();
+            karen_force_idle("STOP_RING host");
+        } else if (udp_ring_pending() && s_state == STATE_IDLE) {
+            udp_ring_clear_pending();
+            if (s_ww_available) {
+                wake_word_set_active(false);
+                wake_word_reset();
+            }
+            udp_response_arm();
+            karen_note_state(STATE_WAITING_RESPONSE);
+            ESP_LOGI(TAG, "Ring: attesa audio host…");
         }
     }
 }
@@ -234,27 +255,61 @@ static bool playback_stream(volatile bool *abort)
 static void playback_task(void *arg)
 {
     while (true) {
-        while (s_state != STATE_WAITING_RESPONSE) vTaskDelay(pdMS_TO_TICKS(10));
+        while (true) {
+            if (s_state == STATE_WAITING_RESPONSE)
+                break;
+            if (udp_ring_is_active() && s_state == STATE_RINGING &&
+                udp_response_packets_received() > 0)
+                break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
 
         s_session_abort = false;
         karen_note_state(STATE_SPEAKING);
+        audio_board_set_duplex_mic(false);
         ESP_LOGI(TAG, "Riproduzione risposta (stream)…");
 
         bool got_data = playback_stream(&s_session_abort);
-
-        udp_response_disarm();
+        udp_response_reset();
 
         if (s_session_abort) {
             ESP_LOGW(TAG, "Riproduzione interrotta (recovery)");
-        } else if (!got_data) {
-            ESP_LOGW(TAG, "Nessun audio ricevuto dal Jetson");
-        } else {
-            ESP_LOGI(TAG, "Risposta terminata");
+            if (!udp_ring_is_active()) {
+                udp_response_disarm();
+                karen_note_state(STATE_IDLE);
+                if (s_ww_available) wake_word_set_active(true);
+            }
+            continue;
         }
 
-        karen_note_state(STATE_IDLE);
-        s_session_abort = false;
-        if (s_ww_available) wake_word_set_active(true);
+        if (!got_data) {
+            ESP_LOGW(TAG, "Nessun audio ricevuto dal Jetson");
+            if (udp_ring_is_active()) {
+                udp_response_arm();
+                karen_note_state(STATE_RINGING);
+                udp_ring_set_listen(true);
+            } else {
+                udp_response_disarm();
+                karen_note_state(STATE_IDLE);
+                if (s_ww_available) wake_word_set_active(true);
+            }
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Risposta terminata");
+
+        if (udp_ring_is_active()) {
+            audio_board_set_duplex_mic(true);
+            udp_response_arm();
+            karen_note_state(STATE_RINGING);
+            udp_ring_set_listen(true);
+            ESP_LOGI(TAG, "Ring: ascolto dismiss (no wake word)…");
+        } else {
+            udp_response_disarm();
+            karen_note_state(STATE_IDLE);
+            s_session_abort = false;
+            if (s_ww_available) wake_word_set_active(true);
+        }
     }
 }
 
@@ -395,6 +450,59 @@ static void audio_main_task(void *arg)
                              had_speech, silence_ms, record_ms);
                 }
                 karen_note_state(STATE_WAITING_RESPONSE);
+            }
+            break;
+        }
+
+        case STATE_RINGING: {
+            if (!udp_ring_listen_active()) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            }
+
+            static bool ring_listen_reset = true;
+            if (ring_listen_reset) {
+                seq         = 0;
+                record_ms   = 0;
+                silence_ms  = 0;
+                had_speech  = false;
+                ring_listen_reset = false;
+            }
+
+            if (ww_available) {
+                for (int i = 0; i < n; i++)
+                    mono_frame[i] = dual_frame[i * 2];
+            }
+
+            for (int off = 0; off < n; off += UDP_CHUNK_SAMPLES) {
+                int chunk = n - off;
+                if (chunk > UDP_CHUNK_SAMPLES) chunk = UDP_CHUNK_SAMPLES;
+                udp_send_audio(mono_frame + off, (size_t)chunk, seq++);
+            }
+            record_ms += frame_ms;
+
+            uint32_t rms = compute_rms(mono_frame, (size_t)n);
+            if (rms >= VAD_SPEECH_THRESHOLD)
+                had_speech = true;
+
+            if (had_speech && rms < VAD_SILENCE_THRESHOLD)
+                silence_ms += frame_ms;
+            else if (rms >= VAD_SPEECH_THRESHOLD)
+                silence_ms = 0;
+
+            bool end_listen = record_ms >= RING_LISTEN_MS;
+            bool end_speech = had_speech && silence_ms >= 800;
+
+            if (end_listen || end_speech) {
+                udp_send_end_of_audio();
+                udp_ring_set_listen(false);
+                ring_listen_reset = true;
+                ESP_LOGI(TAG, "Ring: fine ascolto dismiss (tot=%lums speech=%d)",
+                         record_ms, had_speech);
+                record_ms  = 0;
+                silence_ms = 0;
+                had_speech = false;
+                seq        = 0;
             }
             break;
         }

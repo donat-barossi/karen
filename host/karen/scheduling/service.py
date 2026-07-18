@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..ha_client import HomeAssistantClient
+from ..scheduling.ringing import RingController
 from .store import ScheduleStore
 
 log = logging.getLogger(__name__)
@@ -69,12 +70,16 @@ class ScheduleService:
         self._tz = ZoneInfo(cfg.get("ha", {}).get("timezone", "Europe/Rome"))
         self._ha_cfg = cfg.get("ha", {})
         self._voice_announce: Any = None
+        self._ring: RingController | None = None
         self._task: asyncio.Task | None = None
         self._data = self._store.load()
 
     def set_voice_announce(self, callback: Any) -> None:
         """Callback async(message: str) → annuncio TTS su ESP32."""
         self._voice_announce = callback
+
+    def set_ring_controller(self, ring: RingController) -> None:
+        self._ring = ring
 
     async def start(self) -> None:
         if self._task is None or self._task.done():
@@ -281,6 +286,12 @@ class ScheduleService:
             )
         return None
 
+    async def _ring(self, message: str, kind: str) -> None:
+        if self._ring:
+            await self._ring.start(message, kind=kind)
+            return
+        await self._announce(message)
+
     async def _announce(self, message: str) -> None:
         if self._voice_announce:
             try:
@@ -334,7 +345,7 @@ class ScheduleService:
             if ends <= now:
                 timer["fired"] = True
                 changed = True
-                await self._announce("Tempo scaduto!")
+                await self._ring("Tempo scaduto!", kind="timer")
 
         if changed:
             self._data["timers"] = [t for t in self._data["timers"] if not t.get("fired")]
@@ -353,4 +364,7 @@ class ScheduleService:
                 continue
             alarm["last_fired"] = today
             self._persist()
-            await self._announce(f"{alarm.get('name', 'Sveglia')}! È ora di svegliarsi.")
+            await self._ring(
+                f"{alarm.get('name', 'Sveglia')}! È ora di svegliarsi.",
+                kind="alarm",
+            )

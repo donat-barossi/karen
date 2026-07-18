@@ -33,6 +33,14 @@ size_t udp_response_packets_received(void);
 /** Attende un nuovo pacchetto (o END) dal task RX. */
 bool udp_response_wait_event(uint32_t timeout_ms);
 
+bool udp_ring_is_active(void);
+bool udp_ring_listen_active(void);
+void udp_ring_set_listen(bool enable);
+bool udp_ring_pending(void);
+bool udp_ring_stop_pending(void);
+void udp_ring_clear_pending(void);
+void udp_ring_clear_stop(void);
+
 void udp_transport_deinit(void);
 
 #ifdef __cplusplus

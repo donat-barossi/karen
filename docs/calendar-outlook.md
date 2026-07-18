@@ -89,6 +89,14 @@ Timer e sveglie sono gestiti **localmente sul host Karen** (file `host/data/sche
 - Comandi: *"timer di 5 minuti"*, *"annulla timer"*, *"annulla tutti i timer"*, *"quali timer ho?"*
 - Alla scadenza Karen annuncia via `script.karen_announce` in Home Assistant
 
+### Allarme continuo e dismiss
+
+- Timer e sveglia **suonano in loop** finché non li fermi
+- Durante l'allarme l'ESP ascolta **senza wake word**
+- Frasi per fermare: *"stop"*, *"basta"*, *"ferma"*, *"si sono sveglio"*, *"sono sveglio"*
+- Con wake word: *"Hey Kira, stop"* funziona sempre
+- Richiede firmware ESP32 aggiornato (modalità `RINGING`)
+
 ### Sveglie ricorrenti
 
 - Più sveglie con giorni diversi, es.:

@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from karen.config_loader import load_config
+from karen.scheduling import RingController
 from karen.pipeline import KarenPipeline
 from karen.transport import AudioServer
 
@@ -52,6 +53,11 @@ async def main() -> None:
         pipeline=pipeline,
         stream_cfg=transport_cfg.get("upload_stream"),
     )
+
+    ring = RingController(cfg)
+    ring.attach_transport(server)
+    server.set_ring_controller(ring)
+    pipeline.set_ring_controller(ring)
 
     async def voice_announce(message: str) -> None:
         pcm = await asyncio.to_thread(pipeline._synthesize_phrase, message)

@@ -26,6 +26,7 @@ static esp_codec_dev_handle_t   s_in_dev     = NULL;
 static const audio_codec_data_if_t *s_data_if = NULL;
 static uint32_t                   s_play_rate = AUDIO_SAMPLE_RATE;
 static volatile bool              s_playback_active = false;
+static volatile bool              s_duplex_mic      = false;
 
 static esp_err_t open_out_codec(uint32_t sample_rate)
 {
@@ -309,6 +310,11 @@ bool audio_board_is_playback_active(void)
     return s_playback_active;
 }
 
+void audio_board_set_duplex_mic(bool enable)
+{
+    s_duplex_mic = enable;
+}
+
 esp_err_t audio_board_recover_input(void)
 {
     s_playback_active = false;
@@ -378,7 +384,7 @@ int audio_board_mic_read(int16_t *tdm_out, size_t samples)
 {
     if (!s_in_dev || !tdm_out) return -1;
 
-    if (s_playback_active) {
+    if (s_playback_active && !s_duplex_mic) {
         memset(tdm_out, 0, samples * MIC_TDM_SLOTS * sizeof(int16_t));
         return (int)samples;
     }

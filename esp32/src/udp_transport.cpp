@@ -35,6 +35,10 @@ static response_slot_t *s_response_slots = NULL;
 static uint16_t         s_last_seq    = 0;
 static bool             s_stream_done = false;
 static volatile bool    s_armed       = false;
+static volatile bool    s_ring_active  = false;
+static volatile bool    s_ring_pending = false;
+static volatile bool    s_ring_stop    = false;
+static volatile bool    s_ring_listen  = false;
 static SemaphoreHandle_t s_pkt_sem    = NULL;
 static size_t           s_pkts_recv   = 0;
 
@@ -102,7 +106,7 @@ static void notify_packet(void)
 static bool store_response_packet(uint8_t pkt_type, uint16_t seq,
                                   const void *payload, size_t payload_bytes)
 {
-    if (!s_armed) {
+    if (!s_armed && !s_ring_active) {
         ESP_LOGW(TAG, "Pacchetto risposta scartato (RX non armato) seq=%u", seq);
         return false;
     }
@@ -162,6 +166,23 @@ static void udp_recv_task(void *arg)
 
         uint8_t pkt_type = hdr.type;
         uint16_t seq     = ntohs(hdr.seq);
+
+        if (pkt_type == PKT_TYPE_START_RING) {
+            s_ring_active  = true;
+            s_ring_pending = true;
+            s_ring_stop    = false;
+            udp_response_arm();
+            ESP_LOGI(TAG, "RX START_RING → ring attivo");
+            continue;
+        }
+        if (pkt_type == PKT_TYPE_STOP_RING) {
+            s_ring_active  = false;
+            s_ring_listen  = false;
+            s_ring_stop    = true;
+            udp_response_disarm();
+            ESP_LOGI(TAG, "RX STOP_RING → ring fermato");
+            continue;
+        }
 
         if (pkt_type != PKT_TYPE_RESPONSE && pkt_type != PKT_TYPE_END_RESPONSE)
             continue;
@@ -355,6 +376,41 @@ bool udp_response_wait_event(uint32_t timeout_ms)
     if (!s_pkt_sem)
         return false;
     return xSemaphoreTake(s_pkt_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
+bool udp_ring_is_active(void)
+{
+    return s_ring_active;
+}
+
+bool udp_ring_listen_active(void)
+{
+    return s_ring_listen;
+}
+
+void udp_ring_set_listen(bool enable)
+{
+    s_ring_listen = enable;
+}
+
+bool udp_ring_pending(void)
+{
+    return s_ring_pending;
+}
+
+bool udp_ring_stop_pending(void)
+{
+    return s_ring_stop;
+}
+
+void udp_ring_clear_pending(void)
+{
+    s_ring_pending = false;
+}
+
+void udp_ring_clear_stop(void)
+{
+    s_ring_stop = false;
 }
 
 void udp_transport_deinit(void)

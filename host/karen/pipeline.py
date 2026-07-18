@@ -22,6 +22,7 @@ from .audio_util import normalize_pcm16, resample_pcm16, trim_silence_pcm16
 
 from .scheduling import ScheduleService
 from .scheduling.service import parse_weekdays
+from .scheduling.ringing import is_dismiss_phrase
 from .asr import WhisperASR
 from .llm import LLMEngine
 from .tts import PiperTTS
@@ -83,6 +84,16 @@ class KarenPipeline:
 
     def set_voice_announce(self, callback: Any) -> None:
         self._schedule.set_voice_announce(callback)
+
+    def set_ring_controller(self, ring: Any) -> None:
+        self._cfg["ring_controller"] = ring
+        self._schedule.set_ring_controller(ring)
+
+    async def transcribe_only(self, audio_pcm16: bytes) -> str:
+        audio_pcm16 = trim_silence_pcm16(audio_pcm16, ESP32_SAMPLE_RATE)
+        return await asyncio.to_thread(
+            lambda: _clean_transcript(self.asr.transcribe(audio_pcm16))
+        )
 
     async def process(self, audio_pcm16: bytes) -> bytes:
         """Pipeline completa; ASR/LLM/TTS in thread pool, skills async."""
@@ -153,6 +164,10 @@ class KarenPipeline:
         Bypass LLM per comandi frequenti: più veloce e risposta sempre in italiano.
         """
         t = self._normalize_user_text(text)
+
+        ring = self._cfg.get("ring_controller")
+        if ring and getattr(ring, "is_active", False) and is_dismiss_phrase(t):
+            return {**self._intent("ringing"), "parameters": {"action": "dismiss"}}
 
         if self._looks_like_time_query(text):
             return self._intent("time")

@@ -13,7 +13,7 @@ import audioop
 import logging
 import struct
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .pipeline import ESP32_SAMPLE_RATE
 from .audio_util import normalize_pcm16, resample_pcm16
@@ -30,6 +30,8 @@ PKT_END_AUDIO = 0x02
 PKT_RESPONSE = 0x03
 PKT_END_RESPONSE = 0x04
 PKT_ERROR = 0x05
+PKT_START_RING = 0x06
+PKT_STOP_RING = 0x07
 
 HEADER_SIZE = 8  # magic(4) + type(1) + reserved(1) + seq(2)
 
@@ -150,6 +152,32 @@ class AudioServer:
         self._transport: asyncio.DatagramTransport | None = None
         self._stream_lock = asyncio.Lock()
         self._process_lock = asyncio.Lock()
+        self._ring_mode = False
+        self._ring_controller: Any = None
+
+    def set_ring_controller(self, ring: Any) -> None:
+        self._ring_controller = ring
+
+    async def start_ring(self) -> None:
+        self._ring_mode = True
+        await self._send_control(PKT_START_RING)
+        log.info("Modalità ring avviata → ESP32")
+
+    async def stop_ring(self) -> None:
+        self._ring_mode = False
+        await self._send_control(PKT_STOP_RING)
+        log.info("Modalità ring fermata → ESP32")
+
+    async def send_ring_audio(self, message: str) -> float:
+        pcm = await asyncio.to_thread(self._pipeline._synthesize_phrase, message)
+        await self._send_audio_response(pcm)
+        return len(pcm) / (2 * ESP32_SAMPLE_RATE)
+
+    async def _send_control(self, pkt_type: int) -> None:
+        if self._transport is None:
+            return
+        packet = _make_header(pkt_type, 0)
+        self._transport.sendto(packet, self._esp32_addr)
 
     async def serve_forever(self) -> None:
         loop = asyncio.get_running_loop()
@@ -188,7 +216,10 @@ class AudioServer:
                         len(audio) / (ESP32_SAMPLE_RATE * 2),
                         len(audio),
                     )
-                    asyncio.ensure_future(self._process_and_respond(audio))
+                    if self._ring_mode:
+                        asyncio.ensure_future(self._process_ring_upload(audio))
+                    else:
+                        asyncio.ensure_future(self._process_and_respond(audio))
 
             elif pkt_type == PKT_END_AUDIO:
                 if self._stream is None:
@@ -204,7 +235,10 @@ class AudioServer:
                     len(audio) / (ESP32_SAMPLE_RATE * 2),
                     len(audio),
                 )
-                asyncio.ensure_future(self._process_and_respond(audio))
+                if self._ring_mode:
+                    asyncio.ensure_future(self._process_ring_upload(audio))
+                else:
+                    asyncio.ensure_future(self._process_and_respond(audio))
 
     def _should_finalize_early(self, stream: UploadStream) -> bool:
         if self._vad_silence_ms <= 0:
@@ -216,8 +250,18 @@ class AudioServer:
         return stream.silence_ms() >= self._vad_silence_ms
 
     async def send_audio(self, audio_pcm16: bytes) -> None:
-        """Invia audio TTS all'ESP32 (es. scadenza timer)."""
+        """Invia audio TTS all'ESP32 (es. conferma singola)."""
         await self._send_audio_response(audio_pcm16)
+
+    async def _process_ring_upload(self, audio_pcm16: bytes) -> None:
+        if not audio_pcm16 or not self._ring_controller:
+            return
+        text = await self._pipeline.transcribe_only(audio_pcm16)
+        if not text:
+            return
+        log.info("Ring listen ASR → '%s'", text)
+        if self._ring_controller.notify_dismiss_from_asr(text):
+            await self._transport.send_ring_audio(self._ring_controller.dismiss_ack)
 
     async def _process_and_respond(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16:

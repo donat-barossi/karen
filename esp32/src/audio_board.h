@@ -37,6 +37,9 @@ esp_err_t audio_board_end_playback(void);
 /** true mentre il playback TTS è in corso. */
 bool audio_board_is_playback_active(void);
 
+/** Durante ring: microfono attivo anche con speaker (per dismiss senza wake word). */
+void audio_board_set_duplex_mic(bool enable);
+
 /** Ripristina microfono/I2S RX dopo errori o sessioni bloccate. */
 esp_err_t audio_board_recover_input(void);
 

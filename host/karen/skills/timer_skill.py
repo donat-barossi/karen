@@ -40,7 +40,7 @@ class TimerSkill(BaseSkill):
 
     @property
     def handled_intents(self) -> list[str]:
-        return ["timer", "alarm"]
+        return ["timer", "alarm", "ringing"]
 
     def _sched_svc(self) -> ScheduleService:
         if self._sched is None:
@@ -50,6 +50,14 @@ class TimerSkill(BaseSkill):
     async def execute(self, intent_data: dict[str, Any]) -> str:
         intent = intent_data.get("intent")
         params = intent_data.get("parameters", {})
+
+        if intent == "ringing":
+            ring = self._cfg.get("ring_controller")
+            if ring and params.get("action") == "dismiss":
+                await ring.dismiss()
+                return "Ok!"
+            return "Non c'è nessun allarme attivo."
+
         sched = self._sched_svc()
 
         if intent == "timer":
