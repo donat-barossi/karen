@@ -7,4 +7,4 @@ asr:
   compute_type: float32
 
 logging:
-  file: karen.log
+  file: null

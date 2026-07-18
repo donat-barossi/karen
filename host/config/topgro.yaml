@@ -11,4 +11,4 @@ tts:
   use_cuda: false
 
 logging:
-  file: karen.log
+  file: null

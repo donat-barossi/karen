@@ -168,6 +168,9 @@ class AudioServer:
     ) -> None:
         async with self._stream_lock:
             if pkt_type == PKT_AUDIO:
+                if self._stream is not None and self._stream.finalized:
+                    return
+
                 if self._stream is None or not self._stream.active:
                     log.info("Inizio upload stream da %s", addr)
                     self._reply_addr = (addr[0], self._esp32_addr[1])

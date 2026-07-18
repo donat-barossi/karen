@@ -126,6 +126,10 @@ class KarenPipeline:
         if any(p in t for p in ("che ore", "che ora", "dimmi l'ora", "ora sono")):
             return self._intent("time")
 
+        # Errori ASR frequenti su "che ore sono"
+        if re.search(r"\bor[aei]\b.*\bsono\b", t) or "ori sono" in t:
+            return self._intent("time")
+
         if any(p in t for p in ("che giorno", "che data", "data di oggi", "data è oggi")):
             return self._intent("date")
 
@@ -135,7 +139,8 @@ class KarenPipeline:
                 "parameters": {"when": "today"},
             }
 
-        if any(p in t for p in ("ciao", "come stai", "salve", "buongiorno", "buonasera")):
+        greetings = ("ciao", "salve", "buongiorno", "buonasera", "come stai")
+        if t in greetings or t.startswith("ciao ") and len(t) < 24:
             return {
                 **self._intent("general"),
                 "response_it": "Ciao! Sono Karen, come posso aiutarti?",

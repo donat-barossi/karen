@@ -7,7 +7,7 @@ transport:
   esp32_port: 7002
   upload_stream:
     vad_threshold: 300
-    vad_silence_ms: 700
+    vad_silence_ms: 0       # 0 = attendi END_AUDIO dall'ESP32 (VAD solo lato ESP)
     min_duration_s: 0.5
 
 ha:
@@ -47,4 +47,4 @@ weather:
 
 logging:
   level: "INFO"
-  file: null
+  file: null              # systemd scrive già su host/karen.log

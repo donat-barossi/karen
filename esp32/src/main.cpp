@@ -338,6 +338,7 @@ static void audio_main_task(void *arg)
 #if WAKE_ACK_BEEP
                 audio_board_play_ack_tone();
 #endif
+                udp_response_arm();
                 karen_note_state(STATE_LISTENING);
                 seq        = 0;
                 silence_ms = 0;
@@ -372,7 +373,6 @@ static void audio_main_task(void *arg)
                 silence_ms = 0;
 
             if (silence_ms >= VAD_SILENCE_MS || record_ms >= VAD_MAX_RECORD_MS) {
-                udp_response_arm();
                 udp_send_end_of_audio();
                 ESP_LOGI(TAG, "Fine registrazione (silenzio=%lums, tot=%lums)",
                          silence_ms, record_ms);
