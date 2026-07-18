@@ -100,6 +100,7 @@ Config: `host/config/base.yaml` + `host/config/{profile}.yaml` + override opzion
 | [Setup completo](docs/setup-guide.md) | Installazione passo-passo |
 | [Test e debug](docs/testing-and-debug.md) | Debug completo per livello |
 | [Migrazione TOPGRO](docs/topgro-migration.md) | Piano e stato migrazione |
+| [Timer, sveglie, Outlook](docs/calendar-outlook.md) | Calendario e promemoria |
 | [Cablaggio Waveshare](docs/hardware-wiring.md) | Pinout e schema audio |
 
 ---

@@ -7,9 +7,10 @@ from typing import Any
 
 from .base import BaseSkill
 from .datetime_skill import DateTimeSkill
-from .timer_skill import TimerSkill
+from .timer_skill import TimerSkill, parse_alarm_time, parse_timer_duration
 from .weather_skill import WeatherSkill
 from .ha_skill import HomeAssistantSkill
+from .calendar_skill import CalendarSkill
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class SkillRegistry:
         skills: list[BaseSkill] = [
             DateTimeSkill(self._cfg),
             TimerSkill(self._cfg),
+            CalendarSkill(self._cfg),
             WeatherSkill(self._cfg),
             HomeAssistantSkill(self._cfg),
         ]

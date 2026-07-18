@@ -24,6 +24,7 @@ from .asr import WhisperASR
 from .llm import LLMEngine
 from .tts import PiperTTS
 from .skills import SkillRegistry
+from .skills.timer_skill import parse_alarm_time, parse_timer_duration
 
 log = logging.getLogger(__name__)
 
@@ -150,6 +151,19 @@ class KarenPipeline:
                 **self._intent("weather"),
                 "parameters": {"when": "today"},
             }
+
+        duration = parse_timer_duration(t)
+        if duration is not None:
+            return {**self._intent("timer"), "parameters": {"duration_s": duration}}
+
+        alarm = parse_alarm_time(t)
+        if alarm is not None:
+            h, m = alarm
+            return {**self._intent("alarm"), "parameters": {"hour": h, "minute": m}}
+
+        if any(p in t for p in ("calendario", "agenda", "appuntament")):
+            when = "tomorrow" if "domani" in t else "today"
+            return {**self._intent("calendar_query"), "parameters": {"when": when}}
 
         greetings = ("ciao", "salve", "buongiorno", "buonasera", "come stai")
         if t in greetings or (t.startswith("ciao ") and len(t) < 24):

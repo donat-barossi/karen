@@ -1,10 +1,6 @@
 # Karen – Package Home Assistant
 # Copiare in /config/packages/karen.yaml
-# Aggiungere in configuration.yaml:
-#   homeassistant:
-#     packages: !include_dir_named packages
 
-# ── Input Datetime (sveglia) ──────────────────────────────────────────────────
 input_datetime:
   karen_alarm:
     name: "Karen – Sveglia"
@@ -12,58 +8,64 @@ input_datetime:
     has_date: false
     icon: mdi:alarm
 
-# ── Timer ────────────────────────────────────────────────────────────────────
 timer:
   karen:
     name: "Karen – Timer"
     icon: mdi:timer-outline
     restore: true
 
-# ── Input Boolean (stato Karen) ───────────────────────────────────────────────
 input_boolean:
   karen_active:
-    name: "Karen attiva"
-    icon: mdi:microphone
+    name: "Karen sveglia attiva"
+    icon: mdi:alarm-check
+    initial: true
 
-# ── Script ───────────────────────────────────────────────────────────────────
+input_text:
+  karen_last_announce:
+    name: "Karen – Ultimo annuncio"
+    max: 255
+    initial: ""
+
 script:
   karen_announce:
     alias: "Karen – Annuncio"
-    description: "Invia messaggio TTS (futuro uso)"
     fields:
       message:
         description: "Messaggio da annunciare"
         example: "Il timer è scaduto"
     sequence:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.karen_last_announce
+        data:
+          value: "{{ message }}"
       - service: persistent_notification.create
         data:
           title: "Karen"
           message: "{{ message }}"
+      # Decommenta e imposta il tuo media player per TTS vocale:
+      # - service: tts.speak
+      #   target:
+      #     entity_id: tts.google_translate
+      #   data:
+      #     message: "{{ message }}"
+      #     media_player_entity_id: media_player.salotto
 
-# ── Automazioni ───────────────────────────────────────────────────────────────
 automation:
   - id: karen_timer_expired
     alias: "Karen – Timer scaduto"
-    description: "Notifica quando il timer di Karen scade"
     trigger:
       - platform: event
         event_type: timer.finished
         event_data:
           entity_id: timer.karen
     action:
-      - service: persistent_notification.create
+      - service: script.karen_announce
         data:
-          title: "⏰ Karen – Timer"
           message: "Il timer è scaduto!"
-      # Opzionale: TTS su media player
-      # - service: tts.google_translate_say
-      #   entity_id: media_player.salotto
-      #   data:
-      #     message: "Il timer è scaduto!"
 
   - id: karen_alarm_trigger
     alias: "Karen – Sveglia"
-    description: "Sveglia impostata da Karen"
     trigger:
       - platform: time
         at: input_datetime.karen_alarm
@@ -72,7 +74,23 @@ automation:
         entity_id: input_boolean.karen_active
         state: "on"
     action:
-      - service: persistent_notification.create
+      - service: script.karen_announce
         data:
-          title: "⏰ Karen – Sveglia"
           message: "Buongiorno! È ora di svegliarsi."
+
+  # Promemoria eventi calendario Outlook (15 min prima)
+  # Richiede integrazione Microsoft 365 / Outlook Calendar in HA.
+  # Sostituisci calendar.outlook con il tuo entity_id reale.
+  - id: karen_calendar_reminder
+    alias: "Karen – Promemoria calendario"
+    trigger:
+      - platform: calendar
+        entity_id: calendar.outlook
+        event: start
+        offset: "-00:15:00"
+    action:
+      - service: script.karen_announce
+        data:
+          message: >-
+            Promemoria: {{ trigger.calendar_event.summary }}
+            tra 15 minuti.

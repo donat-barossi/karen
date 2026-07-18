@@ -14,6 +14,14 @@ ha:
   url: "http://192.168.1.100:8123"
   token: "YOUR_HA_LONG_LIVED_TOKEN"
   timeout_s: 5
+  timezone: "Europe/Rome"
+  entities:
+    timer: timer.karen
+    alarm: input_datetime.karen_alarm
+    active: input_boolean.karen_active
+  calendar:
+    entity_id: calendar.outlook   # dopo integrazione Outlook in HA
+    reminder_minutes: 15
 
 asr:
   model_path: "whisper-small-ct2"
@@ -22,7 +30,7 @@ asr:
   beam_size: 3
   vad_filter: false
   condition_on_previous_text: false
-  initial_prompt: "Che ore sono. Che tempo fa. Accendi le luci. Timer cinque minuti."
+  initial_prompt: "Che ore sono. Timer cinque minuti. Sveglia alle sette. Cosa ho in calendario domani."
 
 llm:
   model_path: "phi3-mini-4k-q4_k_m.gguf"
