@@ -2,40 +2,29 @@
 
 ## Prerequisiti
 
-- ESP32-S3 DevKit con INMP441 e MAX98357A cablati (vedi [hardware-wiring.md](hardware-wiring.md))
-- Jetson Orin Nano con JetPack 6.x installato
-- Mini PC con Home Assistant OS o Container
-- Rete Wi-Fi locale (2.4/5 GHz)
+- **ESP32-S3** Waveshare AI Smart Speaker (ES8311 + ES7210 integrati)
+- **Jetson Orin Nano** 8GB con JetPack 6.x
+- **Mini PC** con Home Assistant (opzionale, per timer/luci)
+- Rete Wi-Fi 2.4 GHz (ESP32)
 
 ---
 
 ## 1. Jetson Orin Nano
 
-### 1.1 Setup dipendenze di sistema
+### 1.1 Dipendenze
 
 ```bash
 bash scripts/setup_jetson.sh
-```
-
-Questo script installa:
-- CUDA toolkit (già incluso in JetPack)
-- Python 3.10+, pip, venv
-- llama-cpp-python con backend CUDA
-- faster-whisper
-- piper-tts
-
-### 1.2 Scaricare i modelli
-
-```bash
 bash scripts/install_models.sh
 ```
 
-Scarica in `jetson/models/`:
-- `whisper-small-ct2/` — faster-whisper small (CTranslate2)
-- `phi3-mini-4k-q4_k_m.gguf` — LLM (~2.4 GB)
-- `it_IT-paola-medium.onnx` + `.json` — voce Piper
+Modelli in `jetson/models/` (non versionati):
 
-### 1.3 Configurare Karen
+- `whisper-small-ct2/`
+- `phi3-mini-4k-q4_k_m.gguf`
+- `it_IT-paola-medium.onnx` + `.json`
+
+### 1.2 Configurazione
 
 ```bash
 cd jetson
@@ -43,122 +32,126 @@ cp config.yaml.example config.yaml
 nano config.yaml
 ```
 
-Parametri minimi da impostare:
+Parametri essenziali:
 
 ```yaml
+transport:
+  esp32_ip: "192.168.1.89"
+  esp32_port: 7002
+
 ha:
-  url: "http://192.168.1.XX:8123"    # IP del tuo Mini PC
+  url: "http://192.168.1.100:8123"
   token: "YOUR_HA_LONG_LIVED_TOKEN"
 
-transport:
-  jetson_listen_port: 7001           # porta UDP in ascolto
-  esp32_ip: "192.168.1.YY"          # IP statico dell'ESP32
-  esp32_port: 7002                   # porta UDP per risposta
+asr:
+  device: "cpu"           # Whisper su CPU (evita OOM con LLM su GPU)
+  task: "transcribe"
+  language: "it"
+  vad_filter: false
+
+llm:
+  n_gpu_layers: -1        # Phi-3 su GPU
 ```
 
-### 1.4 Avviare Karen
+### 1.3 Avvio
 
 ```bash
-cd jetson
-python main.py
-# oppure come servizio systemd:
-sudo cp systemd/karen-jetson.service /etc/systemd/system/
-sudo systemctl enable --now karen-jetson
+# Manuale
+bash jetson/scripts/start_karen.sh
+
+# Servizio systemd (consigliato)
+bash jetson/scripts/install_systemd.sh
+sudo loginctl enable-linger $USER   # avvio al boot
+```
+
+Verifica:
+
+```bash
+systemctl --user status karen-jetson
+ss -ulnp | grep 7001
 ```
 
 ---
 
 ## 2. ESP32-S3
 
-### 2.1 Installare PlatformIO
+### 2.1 PlatformIO
 
 ```bash
-pip install platformio
+python3 -m venv ~/.karen-pio-venv
+~/.karen-pio-venv/bin/pip install platformio
 ```
 
-### 2.2 Configurare il firmware
+### 2.2 Configurazione firmware
 
 ```bash
 cd esp32
 cp src/config.h.example src/config.h
-nano src/config.h
 ```
-
-Valori da impostare:
 
 ```cpp
-#define WIFI_SSID    "NomeReteCasa"
-#define WIFI_PASS    "PasswordWiFi"
-#define JETSON_IP    "192.168.1.XX"   // IP del Jetson
+#define WIFI_SSID    "TuaRete"
+#define WIFI_PASS    "TuaPassword"
+#define JETSON_IP    "192.168.1.96"
 ```
 
-### 2.3 Compilare e flashare
+### 2.3 Flash e monitor
 
 ```bash
-pio run --target upload --upload-port /dev/ttyUSB0
-pio device monitor --baud 115200
+~/.karen-pio-venv/bin/pio run -t upload --upload-port /dev/ttyACM0
+~/.karen-pio-venv/bin/pio device monitor --port /dev/ttyACM0 --baud 115200
 ```
 
-### 2.4 Wake word personalizzato "Ehi Karen"
+Log atteso: `Karen pronta (supervisor attivo).`
 
-Il firmware usa di default il modello **WakeNet9 "hilexin"** (placeholder).  
-Per ottenere il wake word personalizzato "Ehi Karen":
-
-1. Vai su [https://github.com/espressif/esp-sr](https://github.com/espressif/esp-sr)
-2. Segui il processo di training custom wake word (richiede account Espressif)
-3. Scarica il modello `.bin` generato
-4. Sostituiscilo in `esp32/components/esp-sr/models/`
-
-> **Alternativa:** usa il wake word "Hey Karen" (inglese) con WakeNet9,
-> più semplice da riconoscere per il motore ESP-SR.
+Wake word: **"Hey Kira"** (modello `wn9_heykira_tts3` in flash @ 0x210000).
 
 ---
 
-## 3. Home Assistant (Mini PC)
-
-### 3.1 Abilitare i package
-
-Nel file `configuration.yaml`:
-
-```yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
-
-### 3.2 Copiare il package Karen
+## 3. Home Assistant
 
 ```bash
-cp homeassistant/packages/karen.yaml /config/packages/karen.yaml
+cp homeassistant/packages/karen.yaml /path/to/ha/config/packages/
 ```
 
-Poi **Strumenti sviluppatore → Verifica configurazione → Riavvia**.
+Genera token in HA → Profilo → Long-Lived Access Tokens → incolla in `jetson/config.yaml`.
 
-### 3.3 Generare il token API
-
-1. Profilo HA → "Token di lunga durata"
-2. Crea nuovo token, copialo in `jetson/config.yaml`
+Docker: vedi `homeassistant/docker/docker-compose.yml`.
 
 ---
 
-## 4. Test del sistema
+## 4. Test
+
+### Pipeline Jetson (senza ESP)
 
 ```bash
-# Testa solo la pipeline Jetson (senza ESP32)
-cd scripts
-python test_pipeline.py --text "che ore sono"
-python test_pipeline.py --text "set a timer for 3 minutes"
-python test_pipeline.py --text "recipe with peppers and shrimp"
+python3 scripts/test_pipeline.py --text "che ore sono"
+python3 scripts/test_pipeline.py --interactive
 ```
+
+### End-to-end
+
+1. Jetson attivo (`karen-jetson` active)
+2. Monitor ESP32 + `tail -f ~/karen/jetson/karen.log`
+3. "Hey Kira" → "Che ore sono?"
+
+Guida debug completa: **[testing-and-debug.md](testing-and-debug.md)**
 
 ---
 
-## 5. Troubleshooting
+## 5. Troubleshooting rapido
 
-| Sintomo | Causa probabile | Soluzione |
-|---------|----------------|-----------|
-| ESP32 non si connette al Wi-Fi | SSID/password errati | Ricontrolla `config.h` |
-| Nessuna risposta dopo wake word | Jetson non raggiungibile | Verifica IP e firewall |
-| ASR molto lento | Whisper usa CPU invece di CUDA | `pip install faster-whisper[cuda]` |
-| LLM risponde male | Prompt non ottimale | Edita `SYSTEM_PROMPT` in `llm.py` |
-| TTS voce non trovata | Modello non scaricato | Riesegui `install_models.sh` |
-| HA non esegue azioni | Token scaduto o errato | Rigenera token in HA |
+| Problema | Soluzione |
+|----------|-----------|
+| Jetson non risponde | `systemctl --user restart karen-jetson` |
+| ESP boot loop | Firmware aggiornato (coda TX PSRAM) |
+| Audio spezzato | Verifica Wi-Fi; log `Skip seq=` |
+| ASR vuoto | `vad_filter: false`; controlla mic |
+| Risposta EN | `task: transcribe`, fast-path italiano |
+
+---
+
+## Cablaggio
+
+Scheda Waveshare all-in-one: nessun cablaggio esterno mic/speaker.  
+Dettagli: [hardware-wiring.md](hardware-wiring.md)

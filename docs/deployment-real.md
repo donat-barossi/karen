@@ -1,6 +1,10 @@
 # Karen – Guida di Deploy Reale (testata)
 
-Questo documento descrive **esattamente** ciò che è stato fatto per far girare Karen, inclusi i bug incontrati e le soluzioni adottate. È la guida definitiva per replicare il sistema su un nuovo nodo ESP32 o su un nuovo server.
+> **Nota (2026):** Parti di questo documento descrivono il primo prototipo (INMP441, PSRAM disabilitata, trigger BOOT).  
+> Per lo **stato attuale** (Waveshare, wake word Hey Kira, streaming UDP, systemd) usa:
+> - [setup-guide.md](setup-guide.md)
+> - [testing-and-debug.md](testing-and-debug.md)
+> - [hardware-wiring.md](hardware-wiring.md)
 
 ---
 

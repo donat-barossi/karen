@@ -4,11 +4,10 @@ Karen – Test Pipeline Jetson
 Permette di testare la pipeline senza ESP32.
 
 Uso:
-    python test_pipeline.py --text "what time is it"
-    python test_pipeline.py --text "set a timer for 3 minutes"
-    python test_pipeline.py --text "turn on the kitchen lights"
-    python test_pipeline.py --audio path/to/audio.wav
-    python test_pipeline.py --interactive
+    python scripts/test_pipeline.py --text "che ore sono"
+    python scripts/test_pipeline.py --text "che tempo fa oggi"
+    python scripts/test_pipeline.py --audio path/to/audio.wav
+    python scripts/test_pipeline.py --interactive
 """
 
 import argparse
@@ -28,17 +27,22 @@ from karen.pipeline import KarenPipeline
 
 def load_config() -> dict:
     cfg_path = Path(__file__).parent.parent / "jetson" / "config.yaml"
+    example = cfg_path.parent / "config.yaml.example"
     if not cfg_path.exists():
-        print(f"[ERRORE] {cfg_path} non trovato. Esegui prima il setup.")
-        sys.exit(1)
+        if example.exists():
+            print(f"[INFO] Copia {example} → {cfg_path}")
+            cfg_path.write_bytes(example.read_bytes())
+        else:
+            print(f"[ERRORE] {cfg_path} non trovato. Esegui prima il setup.")
+            sys.exit(1)
     with open(cfg_path) as f:
         return yaml.safe_load(f)
 
 
 def text_to_fake_audio(text: str) -> bytes:
-    """Crea audio finto (silenzio) – la pipeline riceverà il testo via mock."""
-    samples = np.zeros(16000, dtype=np.int16)  # 1 secondo di silenzio
-    return samples.tobytes()
+    """Silenzio 1 s — utile solo con --full (passa comunque da ASR)."""
+    del text
+    return np.zeros(16000, dtype=np.int16).tobytes()
 
 
 def load_wav(path: str) -> bytes:
@@ -52,29 +56,32 @@ def load_wav(path: str) -> bytes:
     return frames
 
 
-async def test_text(pipeline: KarenPipeline, text_en: str) -> None:
-    """Testa la pipeline iniettando direttamente il testo (bypass ASR)."""
-    print(f"\n[INPUT EN] {text_en}")
+async def test_text(pipeline: KarenPipeline, text_it: str) -> None:
+    """Testa LLM + skills + TTS (bypass ASR)."""
+    print(f"\n[INPUT IT] {text_it}")
 
-    # Bypass ASR: inietta il testo direttamente nell'LLM
-    raw_response = pipeline.llm.generate(text_en)
-    print(f"[LLM RAW] {raw_response}")
+    intent_data = pipeline._fast_intent(text_it)
+    if intent_data is None:
+        raw_response = pipeline.llm.generate(text_it)
+        print(f"[LLM RAW] {raw_response}")
+        intent_data = pipeline._parse_intent(raw_response)
+    else:
+        print(f"[FAST-PATH] intent={intent_data.get('intent')}")
 
-    intent_data = pipeline._parse_intent(raw_response)
     print(f"[INTENT]  {intent_data}")
 
     response_it = await pipeline.skills.execute(intent_data)
     print(f"[RISPOSTA IT] {response_it}")
 
     audio_out = pipeline.tts.synthesize(response_it)
-    print(f"[TTS] {len(audio_out)} byte ({len(audio_out)//(22050*2):.1f} s)")
+    sr = pipeline.tts.sample_rate
+    print(f"[TTS] {len(audio_out)} byte ({len(audio_out)//(sr*2):.1f} s @ {sr} Hz)")
 
-    # Salva risposta audio
-    out_path = "/tmp/karen_response.wav"
-    with wave.open(out_path, "wb") as wf:
+    out_path = Path("/tmp/karen_response.wav")
+    with wave.open(str(out_path), "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(pipeline.tts.sample_rate)
+        wf.setframerate(sr)
         wf.writeframes(audio_out)
     print(f"[AUDIO] Salvato in {out_path}")
 
@@ -82,10 +89,11 @@ async def test_text(pipeline: KarenPipeline, text_en: str) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Karen pipeline test")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--text", help="Testo in inglese da processare (bypass ASR)")
-    group.add_argument("--audio", help="File WAV da processare (16kHz mono PCM)")
+    group.add_argument("--text", help="Testo italiano (bypass ASR, test LLM/skills/TTS)")
+    group.add_argument("--audio", help="File WAV mono 16 kHz PCM (pipeline completa)")
+    group.add_argument("--full", help="Pipeline completa con silenzio (test ASR→TTS)")
     group.add_argument("--interactive", action="store_true",
-                       help="Modalità interattiva da terminale")
+                       help="Modalità interattiva (italiano, bypass ASR)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -99,6 +107,18 @@ async def main() -> None:
 
     if args.text:
         await test_text(pipeline, args.text)
+
+    elif args.full:
+        pcm = text_to_fake_audio("")
+        print("[FULL] Pipeline ASR→…→TTS con 1s silenzio")
+        response_pcm = await pipeline.process(pcm)
+        out_path = Path("/tmp/karen_response_16k.wav")
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(response_pcm)
+        print(f"[AUDIO OUT 16kHz] {out_path} ({len(response_pcm)} byte)")
 
     elif args.audio:
         pcm = load_wav(args.audio)
@@ -114,7 +134,7 @@ async def main() -> None:
 
     elif args.interactive:
         print("Modalità interattiva (CTRL+C per uscire)")
-        print("Inserisci un comando in inglese (testo, bypass ASR):\n")
+        print("Inserisci un comando in italiano (bypass ASR):\n")
         while True:
             try:
                 text = input("> ").strip()
