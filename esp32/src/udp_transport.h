@@ -40,6 +40,8 @@ bool udp_ring_pending(void);
 bool udp_ring_stop_pending(void);
 void udp_ring_clear_pending(void);
 void udp_ring_clear_stop(void);
+bool udp_push_play_pending(void);
+void udp_push_play_clear(void);
 
 void udp_transport_deinit(void);
 

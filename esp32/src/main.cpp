@@ -181,6 +181,14 @@ static void supervisor_task(void *arg)
             udp_response_arm();
             karen_note_state(STATE_WAITING_RESPONSE);
             ESP_LOGI(TAG, "Ring: attesa audio host…");
+        } else if (udp_push_play_pending() && s_state == STATE_IDLE) {
+            udp_push_play_clear();
+            if (s_ww_available) {
+                wake_word_set_active(false);
+                wake_word_reset();
+            }
+            karen_note_state(STATE_WAITING_RESPONSE);
+            ESP_LOGI(TAG, "Annuncio host: avvio playback…");
         }
     }
 }

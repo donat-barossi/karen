@@ -168,9 +168,13 @@ class AudioServer:
         await self._send_control(PKT_STOP_RING)
         log.info("Modalità ring fermata → ESP32")
 
+    async def send_audio(self, audio_pcm16: bytes) -> None:
+        """Invia audio TTS all'ESP32 (timer/sveglia da idle)."""
+        await self._send_audio_response(audio_pcm16, push=True)
+
     async def send_ring_audio(self, message: str) -> float:
         pcm = await asyncio.to_thread(self._pipeline._synthesize_phrase, message)
-        await self._send_audio_response(pcm)
+        await self._send_audio_response(pcm, push=True)
         return len(pcm) / (2 * ESP32_SAMPLE_RATE)
 
     async def _send_control(self, pkt_type: int) -> None:
@@ -249,10 +253,6 @@ class AudioServer:
             return False
         return stream.silence_ms() >= self._vad_silence_ms
 
-    async def send_audio(self, audio_pcm16: bytes) -> None:
-        """Invia audio TTS all'ESP32 (es. conferma singola)."""
-        await self._send_audio_response(audio_pcm16)
-
     async def _process_ring_upload(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16 or not self._ring_controller:
             return
@@ -286,11 +286,12 @@ class AudioServer:
 
             await self._send_audio_response(response_pcm)
 
-    async def _send_audio_response(self, audio_pcm16: bytes) -> None:
+    async def _send_audio_response(self, audio_pcm16: bytes, *, push: bool = False) -> None:
         if self._transport is None:
             return
 
         dest = self._reply_addr or self._esp32_addr
+
         chunk_samples = 512
         chunk_bytes = chunk_samples * 2
         seq = 0

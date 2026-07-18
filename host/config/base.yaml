@@ -11,7 +11,7 @@ transport:
     min_duration_s: 0.5
 
 ha:
-  url: "http://192.168.1.100:8123"
+  url: "http://192.168.1.67:8123"
   token: "YOUR_HA_LONG_LIVED_TOKEN"
   timeout_s: 5
   timezone: "Europe/Rome"

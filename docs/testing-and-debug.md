@@ -8,7 +8,7 @@ Guida operativa per verificare ogni livello del sistema: ESP32 → UDP → Jetso
 |------|------------|-------|
 | ESP32-S3 Waveshare | 192.168.1.89 | Wake word, mic, speaker, UDP |
 | Jetson Orin Nano | 192.168.1.96 | Pipeline AI |
-| Mini PC HA | 192.168.1.100 | Home Assistant (timer, luci, meteo) |
+| Mini PC HA | 192.168.1.67 | Home Assistant (timer, luci, meteo) |
 
 **Porte UDP:** ESP→Jetson **7001**, Jetson→ESP **7002**  
 **Audio:** PCM 16-bit mono **16 kHz** (ESP e risposta TTS resample a 16 kHz)

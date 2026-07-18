@@ -39,6 +39,7 @@ static volatile bool    s_ring_active  = false;
 static volatile bool    s_ring_pending = false;
 static volatile bool    s_ring_stop    = false;
 static volatile bool    s_ring_listen  = false;
+static volatile bool    s_push_play_pending = false;
 static SemaphoreHandle_t s_pkt_sem    = NULL;
 static size_t           s_pkts_recv   = 0;
 
@@ -107,8 +108,9 @@ static bool store_response_packet(uint8_t pkt_type, uint16_t seq,
                                   const void *payload, size_t payload_bytes)
 {
     if (!s_armed && !s_ring_active) {
-        ESP_LOGW(TAG, "Pacchetto risposta scartato (RX non armato) seq=%u", seq);
-        return false;
+        s_armed = true;
+        s_push_play_pending = true;
+        ESP_LOGI(TAG, "Annuncio host: auto-arm RX seq=%u", seq);
     }
 
     if (seq >= MAX_RESPONSE_PKTS) {
@@ -411,6 +413,16 @@ void udp_ring_clear_pending(void)
 void udp_ring_clear_stop(void)
 {
     s_ring_stop = false;
+}
+
+bool udp_push_play_pending(void)
+{
+    return s_push_play_pending;
+}
+
+void udp_push_play_clear(void)
+{
+    s_push_play_pending = false;
 }
 
 void udp_transport_deinit(void)
