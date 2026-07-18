@@ -1,0 +1,23 @@
+# Karen – Configurazione pipeline AI
+#
+# Metodo consigliato: profili in host/config/
+#   base.yaml      → valori condivisi
+#   jetson.yaml    → Jetson Orin Nano
+#   topgro.yaml    → PC gaming TOPGRO
+#
+# Avvio:
+#   KAREN_PROFILE=topgro python3 main.py
+#   KAREN_PROFILE=jetson python3 main.py
+#
+# Override locale (opzionale): copia come config.local.yaml
+# (token HA, IP ESP32 — non sovrascrivere device ASR se usi i profili)
+
+transport:
+  esp32_ip: "192.168.1.89"
+
+ha:
+  token: "YOUR_HA_LONG_LIVED_TOKEN"
+
+weather:
+  latitude: 45.4654
+  longitude: 9.1859

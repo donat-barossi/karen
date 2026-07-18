@@ -1,0 +1,10 @@
+# Jetson Orin Nano 8GB – Whisper CPU, LLM GPU (evita OOM memoria condivisa)
+
+platform: jetson
+
+asr:
+  device: cpu
+  compute_type: float32
+
+logging:
+  file: karen.log

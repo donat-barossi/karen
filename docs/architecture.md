@@ -7,7 +7,7 @@
 │                        RETE LOCALE (Wi-Fi)                          │
 │                                                                     │
 │  ┌──────────────────────┐          ┌────────────────────────────┐   │
-│  │  ESP32-S3 Waveshare    │          │     Jetson Orin Nano       │   │
+│  │  ESP32-S3 Waveshare    │          │   TOPGRO / Jetson (host/)  │   │
 │  │  ES7210 mic + ES8311   │          │                            │   │
 │  │  WakeNet "Hey Kira"    │  UDP     │  faster-whisper (IT)       │   │
 │  │  VAD + TX queue        │─────────►│  llama-cpp Phi-3 Mini      │   │
@@ -88,8 +88,8 @@ Fast-path per comandi frequenti (ora, data, meteo, saluti) bypassa l'LLM.
 |----------|--------|
 | `esp32/src/main.cpp` | Macchina a stati, VAD |
 | `esp32/src/udp_transport.cpp` | TX/RX UDP, streaming playback |
-| `jetson/karen/transport.py` | Server UDP, upload stream |
-| `jetson/karen/pipeline.py` | ASR → LLM → skills → TTS |
-| `jetson/config.yaml` | Rete, modelli, HA |
+| `host/karen/transport.py` | Server UDP, upload stream |
+| `host/karen/pipeline.py` | ASR → LLM → skills → TTS |
+| `host/config/` | Profili jetson / topgro |
 
 Vedi [testing-and-debug.md](testing-and-debug.md) per la procedura di debug completa.

@@ -31,10 +31,11 @@ class PiperTTS:
     def load(self) -> None:
         from piper.voice import PiperVoice
 
+        use_cuda = bool(self._cfg.get("use_cuda", False))
         self._voice = PiperVoice.load(
             self._model_path,
             config_path=self._config_path,
-            use_cuda=True,
+            use_cuda=use_cuda,
         )
         # Recupera il sample rate dal modello
         self._sample_rate = self._voice.config.sample_rate

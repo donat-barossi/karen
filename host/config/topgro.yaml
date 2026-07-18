@@ -1,0 +1,13 @@
+# TOPGRO gaming PC – GTX 1650 4GB, Whisper + LLM su GPU
+
+platform: topgro
+
+asr:
+  device: cuda
+  compute_type: float16
+
+tts:
+  use_cuda: false
+
+logging:
+  file: karen.log

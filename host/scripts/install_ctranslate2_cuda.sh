@@ -3,7 +3,7 @@
 # I wheel PyPI per aarch64 sono CPU-only: faster-whisper non usa la GPU senza questo passo.
 #
 # Uso (sul Jetson):
-#   cd ~/karen/jetson && bash scripts/install_ctranslate2_cuda.sh
+#   cd ~/karen/host && bash scripts/install_ctranslate2_cuda.sh
 #
 # Tempo stimato: 20–40 minuti.
 
@@ -82,4 +82,4 @@ if n == 0:
 PY
 
 echo "=== OK: CTranslate2 CUDA installato ==="
-echo "Riavvia Karen: pkill -f 'python3 main.py'; cd ~/karen/jetson && nohup python3 main.py > karen.log 2>&1 &"
+echo "Riavvia Karen: pkill -f 'python3 main.py'; cd ~/karen/host && nohup python3 main.py > karen.log 2>&1 &"

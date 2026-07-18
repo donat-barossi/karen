@@ -46,4 +46,4 @@ if n == 0:
 PY
 
 echo "=== OK: CTranslate2 CUDA installato ==="
-echo "Avvia Karen con: bash ~/karen/jetson/scripts/start_karen.sh"
+echo "Avvia Karen con: bash ~/karen/host/scripts/start_karen.sh"

@@ -2,7 +2,7 @@
 Karen – Transport Layer
 Server UDP che:
   1. Riceve chunk audio PCM dall'ESP32 in streaming (porta 7001)
-  2. Finalizza su END o silenzio (VAD lato Jetson) e avvia la pipeline
+  2. VAD lato host e avvia la pipeline
   3. Manda la risposta audio all'ESP32 in tempo reale (porta 7002)
 """
 

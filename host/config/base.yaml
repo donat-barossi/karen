@@ -1,5 +1,4 @@
-# Karen – Configurazione pipeline AI
-# Copia come config.yaml e modifica i valori.
+# Karen – configurazione condivisa (tutte le piattaforme)
 
 transport:
   listen_host: "0.0.0.0"
@@ -18,8 +17,6 @@ ha:
 
 asr:
   model_path: "whisper-small-ct2"
-  device: "cpu"
-  compute_type: "float32"
   language: "it"
   task: "transcribe"
   beam_size: 3
@@ -40,6 +37,7 @@ tts:
   config_path: "it_IT-paola-medium.onnx.json"
   sample_rate: 22050
   length_scale: 1.0
+  use_cuda: false
 
 weather:
   latitude: 45.4654

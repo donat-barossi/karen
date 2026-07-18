@@ -5,7 +5,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-MODELS_DIR="$(cd "$(dirname "$0")/../jetson" && pwd)/models"
+HOST_DIR="${KAREN_HOST_DIR:-$(cd "$(dirname "$0")/.." && pwd)/host}"
+MODELS_DIR="$HOST_DIR/models"
 mkdir -p "$MODELS_DIR"
 
 echo "=== Karen – Download modelli AI ==="

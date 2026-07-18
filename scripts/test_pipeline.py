@@ -1,42 +1,30 @@
 #!/usr/bin/env python3
 """
-Karen – Test Pipeline Jetson
+Karen – Test pipeline AI host (Jetson / TOPGRO)
 Permette di testare la pipeline senza ESP32.
 
 Uso:
-    python scripts/test_pipeline.py --text "che ore sono"
-    python scripts/test_pipeline.py --text "che tempo fa oggi"
-    python scripts/test_pipeline.py --audio path/to/audio.wav
+    python scripts/test_pipeline.py --profile topgro --text "che ore sono"
+    python scripts/test_pipeline.py --profile jetson --audio mia_prova.wav
     python scripts/test_pipeline.py --interactive
 """
 
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import wave
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "jetson"))
+REPO_ROOT = Path(__file__).parent.parent
+HOST_DIR = Path(os.environ.get("KAREN_HOST_DIR", REPO_ROOT / "host"))
+sys.path.insert(0, str(HOST_DIR))
 
-import yaml
+from karen.config_loader import load_config
 from karen.pipeline import KarenPipeline
-
-
-def load_config() -> dict:
-    cfg_path = Path(__file__).parent.parent / "jetson" / "config.yaml"
-    example = cfg_path.parent / "config.yaml.example"
-    if not cfg_path.exists():
-        if example.exists():
-            print(f"[INFO] Copia {example} → {cfg_path}")
-            cfg_path.write_bytes(example.read_bytes())
-        else:
-            print(f"[ERRORE] {cfg_path} non trovato. Esegui prima il setup.")
-            sys.exit(1)
-    with open(cfg_path) as f:
-        return yaml.safe_load(f)
 
 
 def text_to_fake_audio(text: str) -> bytes:
@@ -88,6 +76,12 @@ async def test_text(pipeline: KarenPipeline, text_it: str) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Karen pipeline test")
+    parser.add_argument(
+        "--profile",
+        default=os.environ.get("KAREN_PROFILE", "topgro"),
+        choices=("jetson", "topgro"),
+        help="Profilo piattaforma (default: KAREN_PROFILE o topgro)",
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--text", help="Testo italiano (bypass ASR, test LLM/skills/TTS)")
     group.add_argument("--audio", help="File WAV mono 16 kHz PCM (pipeline completa)")
@@ -99,7 +93,8 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s %(name)s – %(message)s")
 
-    cfg = load_config()
+    cfg = load_config(HOST_DIR, profile=args.profile)
+    print(f"Profilo: {cfg.get('platform', args.profile)}")
     pipeline = KarenPipeline(cfg)
     print("Caricamento modelli…")
     await pipeline.initialize()
@@ -128,9 +123,9 @@ async def main() -> None:
         with wave.open(out_path, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(pipeline.tts.sample_rate)
+            wf.setframerate(16000)
             wf.writeframes(response_pcm)
-        print(f"[AUDIO OUT] {out_path}")
+        print(f"[AUDIO OUT 16kHz] {out_path}")
 
     elif args.interactive:
         print("Modalità interattiva (CTRL+C per uscire)")

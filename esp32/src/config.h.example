@@ -11,8 +11,9 @@
 #define WIFI_SSID    "YOUR_WIFI_SSID"
 #define WIFI_PASS    "YOUR_WIFI_PASSWORD"
 
-// ── Jetson Orin Nano ─────────────────────────────────────────────────────────
-#define JETSON_IP           "192.168.1.96"
+// ── Host pipeline AI (Jetson o TOPGRO) ───────────────────────────────────────
+#define KAREN_HOST_IP       "192.168.1.33"
+#define JETSON_IP           KAREN_HOST_IP
 #define AUDIO_TX_PORT       7001
 #define AUDIO_RX_PORT       7002
 

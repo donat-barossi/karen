@@ -1,0 +1,21 @@
+[Unit]
+Description=Karen AI Pipeline (TOPGRO gaming PC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/donat/karen/host
+Environment=KAREN_PROFILE=topgro
+ExecStart=/bin/bash /home/donat/karen/host/scripts/start_karen.sh
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/home/donat/.local/lib:/usr/local/cuda/lib64
+Environment=PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LimitNOFILE=65536
+StandardOutput=append:/home/donat/karen/host/karen.log
+StandardError=append:/home/donat/karen/host/karen.log
+
+[Install]
+WantedBy=default.target

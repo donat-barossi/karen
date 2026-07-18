@@ -1,54 +1,86 @@
 # Migrazione pipeline su TOPGRO (gaming PC)
 
-Obiettivo: spostare il **cervello AI** da Jetson Orin Nano al PC gaming **TOPGRO** (GTX 1650), mantenendo ESP32-S3 e Home Assistant invariati.
+## Architettura adottata
 
-## Stato attuale vs target
-
-| Componente | Jetson (attuale) | TOPGRO (target) |
-|------------|------------------|-----------------|
-| ASR Whisper | CPU float32 (OOM se GPU con LLM) | CUDA, modello più grande possibile |
-| LLM Phi-3 | GPU llama-cpp | GPU CUDA, stesso GGUF o upgrade |
-| TTS Piper | CPU | CPU o GPU se utile |
-| UDP 7001/7002 | `192.168.1.96` | IP statico TOPGRO |
-| ESP `JETSON_IP` | `config.h` | Rinominare / aggiornare IP TOPGRO |
-
-## Piano di lavoro (branch `feature/topgro`)
-
-1. **Ambiente x86_64**
-   - Python venv, `setup_topgro.sh` (da creare da `setup_jetson.sh`)
-   - CUDA + cuDNN compatibili con GTX 1650
-   - `llama-cpp-python` build CUDA, `faster-whisper` GPU
-
-2. **Config**
-   - `topgro/config.yaml` o riuso `jetson/` con profilo device
-   - ASR: `device: cuda`, `compute_type: float16`
-   - LLM: `n_gpu_layers: -1`
-
-3. **Servizio**
-   - systemd user `karen-topgro.service` (stesso pattern Jetson)
-   - Log in `~/karen/topgro/karen.log`
-
-4. **ESP32**
-   - Solo cambio IP in `esp32/src/config.h`:
-     ```cpp
-     #define JETSON_IP    "192.168.1.XXX"  // IP TOPGRO
-     ```
-   - Protocollo UDP KARN invariato
-
-5. **Test**
-   - Livelli 1–5 in [testing-and-debug.md](testing-and-debug.md) ripetuti con host TOPGRO
-   - Confronto latenza Jetson vs TOPGRO
-
-## File da aggiungere in questo branch
+La cartella **`jetson/` è stata rinominata in `host/`**: un solo codice Python con profili piattaforma, senza duplicare la pipeline.
 
 ```
-topgro/                    # Copia/adattamento jetson/karen/
-scripts/setup_topgro.sh
-jetson/systemd/karen-topgro.service   # o topgro/systemd/
-docs/topgro-migration.md   # questo file
+host/
+├── config/
+│   ├── base.yaml      # transport, HA, modelli, logging
+│   ├── jetson.yaml    # ASR CPU (Orin 8GB)
+│   └── topgro.yaml    # ASR CUDA (GTX 1650)
+├── karen/             # pipeline condivisa
+├── scripts/
+│   start_karen.sh     # LD paths aarch64 vs x86_64
+│   install_systemd.sh # jetson | topgro
+└── systemd/
+    ├── karen-jetson.service
+    └── karen-topgro.service
 ```
 
-## Note hardware TOPGRO
+Variabile d'ambiente: **`KAREN_PROFILE=topgro`** o **`jetson`**.
 
-- GTX 1650: 4 GB VRAM — sufficiente per Phi-3 Q4 + Whisper small in GPU con tuning batch
-- Jetson resta fallback finché TOPGRO non è stabile in produzione
+---
+
+## Deploy TOPGRO (192.168.1.33)
+
+```bash
+git clone git@github.com:donat-barossi/karen.git ~/karen
+cd ~/karen
+git checkout feature/topgro
+
+bash scripts/setup_topgro.sh
+bash scripts/install_models.sh
+cp host/config.yaml.example host/config.yaml   # token HA
+
+bash host/scripts/install_systemd.sh topgro
+sudo loginctl enable-linger $USER
+```
+
+Test:
+
+```bash
+export KAREN_PROFILE=topgro
+python3 scripts/test_pipeline.py --profile topgro --text "che ore sono"
+systemctl --user status karen-topgro
+ss -ulnp | grep 7001
+```
+
+---
+
+## ESP32
+
+In `esp32/src/config.h`:
+
+```cpp
+#define KAREN_HOST_IP  "192.168.1.33"
+```
+
+(`JETSON_IP` è un alias retrocompatibile nel firmware.)
+
+---
+
+## Jetson esistente (192.168.1.96)
+
+Dopo `git pull`:
+
+```bash
+# Il path cambia: jetson/ → host/
+bash host/scripts/install_systemd.sh jetson
+systemctl --user disable karen-jetson.service  # se punta al vecchio path
+```
+
+Oppure symlink temporaneo: `ln -s host ~/karen/jetson`
+
+---
+
+## Tuning GTX 1650 (4 GB VRAM)
+
+| Componente | TOPGRO | Note |
+|------------|--------|------|
+| ASR Whisper | GPU float16 | PyPI wheel CUDA x86 |
+| LLM Phi-3 Q4 | GPU | `n_gpu_layers: -1` |
+| TTS Piper | CPU | `use_cuda: false` per risparmiare VRAM |
+
+Se OOM: ridurre `context_length` LLM o usare Whisper `int8_float16`.

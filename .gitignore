@@ -16,6 +16,7 @@ esp32/\$PROJECT_BUILD_DIR/
 esp32/$PROJECT_BUILD_DIR/
 
 # Models – troppo grandi per git
+host/models/
 jetson/models/
 *.gguf
 *.bin
@@ -24,6 +25,8 @@ jetson/models/
 *.pt
 
 # Config con segreti
+host/config.local.yaml
+host/config.yaml
 jetson/config.local.yaml
 homeassistant/secrets.yaml
 esp32/src/config.h
