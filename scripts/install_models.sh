@@ -6,40 +6,41 @@
 set -euo pipefail
 
 HOST_DIR="${KAREN_HOST_DIR:-$(cd "$(dirname "$0")/.." && pwd)/host}"
+VENV_DIR="$HOST_DIR/venv"
 MODELS_DIR="$HOST_DIR/models"
 mkdir -p "$MODELS_DIR"
 
+if [ -x "$VENV_DIR/bin/pip" ]; then
+    PIP="$VENV_DIR/bin/pip"
+    PYTHON="$VENV_DIR/bin/python"
+else
+    echo "[ERRORE] Virtualenv non trovato in $VENV_DIR" >&2
+    echo "Esegui prima: bash scripts/setup_topgro.sh  (o setup_jetson.sh)" >&2
+    exit 1
+fi
+
 echo "=== Karen – Download modelli AI ==="
 echo "Destinazione: $MODELS_DIR"
+echo "Python:       $PYTHON"
 echo ""
 
 # ── 1. Whisper small (CTranslate2 format per faster-whisper) ─────────────────
 echo "[1/3] Whisper small (CTranslate2)…"
 WHISPER_DIR="$MODELS_DIR/whisper-small-ct2"
-if [ -d "$WHISPER_DIR" ]; then
+if [ -d "$WHISPER_DIR" ] && [ -f "$WHISPER_DIR/model.bin" ]; then
     echo "      → già presente, skip."
 else
-    pip install huggingface_hub -q
-    python3 - <<'EOF'
+    "$PIP" install -q huggingface_hub
+    "$PYTHON" - <<PY
 from huggingface_hub import snapshot_download
+
 snapshot_download(
     repo_id="guillaumekln/faster-whisper-small",
-    local_dir="__WHISPER_DIR__",
+    local_dir="${WHISPER_DIR}",
     ignore_patterns=["*.msgpack", "*.h5"],
 )
-EOF
-    # Sostituisci placeholder con percorso reale
-    python3 -c "
-import subprocess, os
-path = os.environ.get('WHISPER_DIR_ENV', '')
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id='guillaumekln/faster-whisper-small',
-    local_dir='$WHISPER_DIR',
-    ignore_patterns=['*.msgpack', '*.h5'],
-)
-print('Whisper scaricato in $WHISPER_DIR')
-"
+print("Whisper scaricato in ${WHISPER_DIR}")
+PY
 fi
 
 # ── 2. Phi-3 Mini 4K Instruct Q4_K_M (GGUF) ──────────────────────────────────
@@ -60,7 +61,7 @@ PIPER_ONNX="$MODELS_DIR/it_IT-paola-medium.onnx"
 PIPER_JSON="$MODELS_DIR/it_IT-paola-medium.onnx.json"
 PIPER_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/it/it_IT/paola/medium"
 
-if [ -f "$PIPER_ONNX" ]; then
+if [ -f "$PIPER_ONNX" ] && [ -f "$PIPER_JSON" ]; then
     echo "      → già presente, skip."
 else
     wget -q --show-progress "$PIPER_BASE/it_IT-paola-medium.onnx"     -O "$PIPER_ONNX"
