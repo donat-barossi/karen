@@ -49,8 +49,15 @@ class WhisperASR:
 
         self._device = device
         self._compute_type = compute_type
-        self._model = self._create_model(device, compute_type)
-        log.info("Whisper: device=%s compute_type=%s", device, compute_type)
+        try:
+            self._model = self._create_model(device, compute_type)
+        except RuntimeError as e:
+            msg = str(e).lower()
+            if device == "cuda" and ("out of memory" in msg or "cuda failed" in msg):
+                self._load_cpu_fallback()
+            else:
+                raise
+        log.info("Whisper: device=%s compute_type=%s", self._device, self._compute_type)
 
     def _release_model(self) -> None:
         self._model = None

@@ -1,10 +1,11 @@
-# TOPGRO gaming PC – GTX 1650 4GB, Whisper + LLM su GPU
+# TOPGRO gaming PC – GTX 1650 4GB
+# Whisper su CPU (16 core x86, veloce); LLM su GPU. CUDA ASR va in OOM se LLM già in VRAM.
 
 platform: topgro
 
 asr:
-  device: cuda
-  compute_type: float16
+  device: cpu
+  compute_type: int8
 
 tts:
   use_cuda: false

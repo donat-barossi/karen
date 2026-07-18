@@ -55,11 +55,11 @@ class KarenPipeline:
         log.info("Caricamento modelli…")
         t0 = time.monotonic()
 
-        self.llm.load()
-        log.info("  ✓ LLM (Phi-3 Mini)")
-
         self.asr.load()
         log.info("  ✓ ASR (Whisper small)")
+
+        self.llm.load()
+        log.info("  ✓ LLM (Phi-3 Mini)")
 
         self.tts.load()
         log.info("  ✓ TTS (Piper)")
