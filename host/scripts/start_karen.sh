@@ -17,4 +17,10 @@ fi
 export PATH="/usr/local/cuda/bin:${PATH}"
 
 cd "$ROOT"
-exec python3 main.py "$@"
+
+PYTHON="${ROOT}/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON=python3
+fi
+
+exec "$PYTHON" main.py "$@"
