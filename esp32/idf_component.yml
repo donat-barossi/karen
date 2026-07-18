@@ -1,0 +1,7 @@
+# ESP-IDF Component Manager – dipendenze
+# Posizionare questo file nella root del progetto esp32/
+dependencies:
+  espressif/esp-sr:
+    version: ">=1.7.0"
+    rules:
+      - if: "target == esp32s3"

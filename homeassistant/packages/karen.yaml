@@ -1,0 +1,78 @@
+# Karen – Package Home Assistant
+# Copiare in /config/packages/karen.yaml
+# Aggiungere in configuration.yaml:
+#   homeassistant:
+#     packages: !include_dir_named packages
+
+# ── Input Datetime (sveglia) ──────────────────────────────────────────────────
+input_datetime:
+  karen_alarm:
+    name: "Karen – Sveglia"
+    has_time: true
+    has_date: false
+    icon: mdi:alarm
+
+# ── Timer ────────────────────────────────────────────────────────────────────
+timer:
+  karen:
+    name: "Karen – Timer"
+    icon: mdi:timer-outline
+    restore: true
+
+# ── Input Boolean (stato Karen) ───────────────────────────────────────────────
+input_boolean:
+  karen_active:
+    name: "Karen attiva"
+    icon: mdi:microphone
+
+# ── Script ───────────────────────────────────────────────────────────────────
+script:
+  karen_announce:
+    alias: "Karen – Annuncio"
+    description: "Invia messaggio TTS (futuro uso)"
+    fields:
+      message:
+        description: "Messaggio da annunciare"
+        example: "Il timer è scaduto"
+    sequence:
+      - service: persistent_notification.create
+        data:
+          title: "Karen"
+          message: "{{ message }}"
+
+# ── Automazioni ───────────────────────────────────────────────────────────────
+automation:
+  - id: karen_timer_expired
+    alias: "Karen – Timer scaduto"
+    description: "Notifica quando il timer di Karen scade"
+    trigger:
+      - platform: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.karen
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "⏰ Karen – Timer"
+          message: "Il timer è scaduto!"
+      # Opzionale: TTS su media player
+      # - service: tts.google_translate_say
+      #   entity_id: media_player.salotto
+      #   data:
+      #     message: "Il timer è scaduto!"
+
+  - id: karen_alarm_trigger
+    alias: "Karen – Sveglia"
+    description: "Sveglia impostata da Karen"
+    trigger:
+      - platform: time
+        at: input_datetime.karen_alarm
+    condition:
+      - condition: state
+        entity_id: input_boolean.karen_active
+        state: "on"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "⏰ Karen – Sveglia"
+          message: "Buongiorno! È ora di svegliarsi."

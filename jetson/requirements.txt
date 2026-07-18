@@ -1,0 +1,36 @@
+# Karen Jetson – Dipendenze Python
+# Installare con: pip install -r requirements.txt
+#
+# Prima di installare, assicurarsi che CUDA sia disponibile sul Jetson:
+#   nvcc --version
+#   python3 -c "import torch; print(torch.cuda.is_available())"
+
+# ── ASR ───────────────────────────────────────────────────────────────────────
+# faster-whisper dipende da ctranslate2.
+# Su Jetson il wheel PyPI è CPU-only: per CUDA vedi scripts/install_ctranslate2_cuda.sh
+faster-whisper==1.0.3
+# NON aggiungere ctranslate2 qui: verrebbe reinstallato il wheel CPU da PyPI
+
+# ── LLM ───────────────────────────────────────────────────────────────────────
+# llama-cpp-python con CUDA (compilare con:)
+# CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python --force-reinstall
+llama-cpp-python>=0.2.56
+
+# ── TTS ───────────────────────────────────────────────────────────────────────
+piper-tts>=1.2.0
+
+# ── Home Assistant client ─────────────────────────────────────────────────────
+aiohttp>=3.9.0
+aiohttp-retry>=2.8.3
+
+# ── Meteo (opzionale – richiede internet) ──────────────────────────────────────
+# open-meteo richiede solo requests standard
+requests>=2.31.0
+
+# ── Audio processing ──────────────────────────────────────────────────────────
+numpy>=1.24.0
+scipy>=1.11.0        # resample audio
+
+# ── Utility ───────────────────────────────────────────────────────────────────
+pyyaml>=6.0
+python-dateutil>=2.8.2

@@ -1,0 +1,60 @@
+# Karen – Configurazione Jetson
+# Copia come config.yaml e modifica i valori.
+
+# ── Rete ────────────────────────────────────────────────────────────────────
+transport:
+  listen_host: "0.0.0.0"
+  listen_port: 7001           # porta UDP in ascolto (audio da ESP32)
+  esp32_ip: "192.168.1.89"   # IP statico dell'ESP32
+  esp32_port: 7002            # porta UDP per risposta
+  upload_stream:
+    vad_threshold: 300        # RMS minimo per considerare voce (come ESP32)
+    vad_silence_ms: 700       # silenzio Jetson → avvia ASR prima di END (0 = disabilitato)
+    min_duration_s: 0.5       # durata minima prima di chiudere con VAD
+
+# ── Home Assistant ────────────────────────────────────────────────────────────
+ha:
+  url: "http://192.168.1.100:8123"   # URL del Mini PC con HA
+  token: "YOUR_HA_LONG_LIVED_TOKEN"
+  timeout_s: 5
+
+# ── ASR (Whisper) ─────────────────────────────────────────────────────────────
+# Orin Nano 8GB: Whisper su CPU (float32), Phi-3 su GPU — evita OOM memoria condivisa.
+asr:
+  model_path: "whisper-small-ct2"
+  device: "cpu"
+  compute_type: "float32"
+  language: "it"
+  task: "transcribe"          # trascrizione in italiano (non tradurre in EN)
+  beam_size: 3                # 3 = buon compromesso qualità/velocità
+  vad_filter: false           # ESP32 già taglia con VAD; Whisper VAD tagliava metà audio
+  condition_on_previous_text: false
+  initial_prompt: "Karen, assistente vocale italiano. Comandi su ora, meteo, luci, timer."
+
+# ── LLM ───────────────────────────────────────────────────────────────────────
+llm:
+  model_path: "phi3-mini-4k-q4_k_m.gguf"
+  n_gpu_layers: -1            # tutti i layer su GPU (Whisper è su CPU)
+  context_length: 2048
+  max_tokens: 128
+  temperature: 0.1
+  top_p: 0.9
+
+# ── TTS (Piper) ───────────────────────────────────────────────────────────────
+tts:
+  model_path: "it_IT-paola-medium.onnx"
+  config_path: "it_IT-paola-medium.onnx.json"
+  sample_rate: 22050
+  length_scale: 1.0           # >1 = più lento, <1 = più veloce
+
+# ── Meteo ─────────────────────────────────────────────────────────────────────
+weather:
+  latitude: 45.4654           # latitudine della tua città
+  longitude: 9.1859           # longitudine della tua città
+  timezone: "Europe/Rome"
+  offline_fallback: true      # risponde che non ha connessione se API non disponibile
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"               # DEBUG, INFO, WARNING, ERROR
+  file: null                  # null = solo stdout, o percorso file

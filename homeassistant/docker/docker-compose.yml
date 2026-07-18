@@ -1,0 +1,21 @@
+
+services:
+  homeassistant:
+    container_name: karen-homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    privileged: true
+    network_mode: host          # necessario per autodiscovery dispositivi LAN
+    environment:
+      - TZ=Europe/Rome
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    labels:
+      - "com.karen.service=homeassistant"

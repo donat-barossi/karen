@@ -1,0 +1,43 @@
+# ESP-IDF sdkconfig defaults
+# ESP32-S3-WROOM-1-N16R8 (16MB Flash, 8MB PSRAM OPI)
+
+# CPU a 240 MHz
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# PSRAM OPI abilitata
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# FreeRTOS tick rate 1000 Hz per timer precisi
+CONFIG_FREERTOS_HZ=1000
+
+# Stack size task main
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Socket
+CONFIG_LWIP_MAX_SOCKETS=12
+
+# Disabilita Bluetooth
+CONFIG_BT_ENABLED=n
+
+# Console su USB Serial JTAG (stessa porta /dev/ttyACM0 usata per flash)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Log level INFO
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ── Partition table custom ─────────────────────────────────────────────────────
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# ── ESP-SR: modello wake word ─────────────────────────────────────────────────
+# Legge il modello dalla flash (partizione "model")
+CONFIG_MODEL_IN_FLASH=y
+
+# Seleziona "Hey Kira" (WakeNet9 TTS3) – foneticamente simile a "Hey Karen"
+CONFIG_SR_WN_WN9_HEYKIRA_TTS3=y
+

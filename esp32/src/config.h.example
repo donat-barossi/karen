@@ -1,0 +1,80 @@
+#pragma once
+
+// Copia come config.h e modifica SSID/password Wi-Fi.
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Karen – ESP32-S3 Firmware Configuration
+//  Waveshare ESP32-S3 AI Smart Speaker Development Board (ESP32-S3-AUDIO-Board)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Wi-Fi ────────────────────────────────────────────────────────────────────
+#define WIFI_SSID    "YOUR_WIFI_SSID"
+#define WIFI_PASS    "YOUR_WIFI_PASSWORD"
+
+// ── Jetson Orin Nano ─────────────────────────────────────────────────────────
+#define JETSON_IP           "192.168.1.96"
+#define AUDIO_TX_PORT       7001
+#define AUDIO_RX_PORT       7002
+
+// ── I2C (ES8311 @0x18, ES7210 @0x40, TCA9555 @0x20) ─────────────────────────
+#define I2C_PORT            I2C_NUM_0
+#define I2C_SCL_GPIO        GPIO_NUM_10
+#define I2C_SDA_GPIO        GPIO_NUM_11
+#define I2C_FREQ_HZ         400000
+
+// ── I2S full-duplex (bus condiviso) ──────────────────────────────────────────
+#define I2S_PORT            I2S_NUM_0
+#define I2S_MCLK_GPIO       GPIO_NUM_12
+#define I2S_BCLK_GPIO       GPIO_NUM_13
+#define I2S_LRCK_GPIO       GPIO_NUM_14
+#define I2S_DIN_GPIO        GPIO_NUM_15   // ES7210 ASDOUT → ESP32
+#define I2S_DOUT_GPIO       GPIO_NUM_16   // ESP32 → ES8311 DSDIN
+
+#define I2S_MCLK_MULTIPLE   256
+
+// ── TCA9555 IO expander ──────────────────────────────────────────────────────
+#define TCA9555_I2C_ADDR    0x20
+#define TCA9555_PA_PIN      IO_EXPANDER_PIN_NUM_8   // NS4150 amplifier enable
+
+// ── Pulsante BOOT ────────────────────────────────────────────────────────────
+#define WAKE_BUTTON_GPIO    GPIO_NUM_0
+
+// ── Parametri audio ──────────────────────────────────────────────────────────
+#define AUDIO_SAMPLE_RATE   16000
+#define SPK_SAMPLE_RATE     22050
+#define AUDIO_BITS          16
+#define MIC_TDM_SLOTS       4
+#define AFE_CHUNK_SAMPLES   1024   // chunksize AFE dual-mic (get_feed_chunksize)
+#define UDP_CHUNK_SAMPLES   512
+#define UDP_CHUNK_BYTES     (UDP_CHUNK_SAMPLES * sizeof(int16_t))
+
+// ── Wake word ────────────────────────────────────────────────────────────────
+#define WAKEWORD_MODEL_NAME "wn9_heykira_tts3"
+
+// ── VAD – rilevamento fine frase ─────────────────────────────────────────────
+#define VAD_SILENCE_THRESHOLD   300
+#define VAD_SILENCE_MS          1800
+#define VAD_MAX_RECORD_MS       8000
+
+#define RESPONSE_FIRST_TIMEOUT_MS  90000
+#define RESPONSE_CHUNK_TIMEOUT_MS  3000
+#define STREAM_GAP_TIMEOUT_MS      100
+
+#define UDP_TX_QUEUE_DEPTH      160
+#define UDP_TX_PACE_MS          32
+
+#define STATE_LISTENING_MAX_MS     (VAD_MAX_RECORD_MS + 5000)
+#define STATE_WAITING_MAX_MS       120000
+#define STATE_SPEAKING_MAX_MS      180000
+#define MIC_FAIL_RECOVER_COUNT     8
+#define SUPERVISOR_INTERVAL_MS     5000
+
+#define SPEAKER_VOLUME        80
+#define WAKE_ACK_BEEP         1
+
+#define PACKET_MAGIC            0x4B41524E
+#define PKT_TYPE_AUDIO          0x01
+#define PKT_TYPE_END_AUDIO      0x02
+#define PKT_TYPE_RESPONSE       0x03
+#define PKT_TYPE_END_RESPONSE   0x04
+#define PKT_TYPE_ERROR          0x05

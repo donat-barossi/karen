@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "audio_board.c"
+        "i2s_audio.cpp"
+        "wake_word.cpp"
+        "udp_transport.cpp"
+    INCLUDE_DIRS "."
+    REQUIRES
+        esp-sr
+        esp_codec_dev
+        esp_io_expander
+        esp_io_expander_tca95xx_16bit
+        driver
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        lwip
+)

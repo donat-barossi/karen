@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+venv/
+env/
+
+# PlatformIO / ESP32
+esp32/.pio/
+esp32/.piolibdeps/
+esp32/managed_components/
+esp32/\$PROJECT_BUILD_DIR/
+esp32/$PROJECT_BUILD_DIR/
+
+# Models – troppo grandi per git
+jetson/models/
+*.gguf
+*.bin
+*.onnx
+*.tflite
+*.pt
+
+# Config con segreti
+jetson/config.local.yaml
+homeassistant/secrets.yaml
+esp32/src/config.h
+
+# Home Assistant runtime (docker)
+homeassistant/docker/config/
+
+# Audio temporanei
+*.wav
+*.pcm
+*.raw
+temp_audio/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

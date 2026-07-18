@@ -1,0 +1,21 @@
+[Unit]
+Description=Karen AI Pipeline (Jetson Orin Nano)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=donat
+WorkingDirectory=/home/donat/karen/jetson
+ExecStart=/bin/bash /home/donat/karen/jetson/scripts/start_karen.sh
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/home/donat/.local/lib:/usr/lib/aarch64-linux-gnu/openblas-pthread:/usr/local/cuda/lib64
+Environment=PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LimitNOFILE=65536
+StandardOutput=append:/home/donat/karen/jetson/karen.log
+StandardError=append:/home/donat/karen/jetson/karen.log
+
+[Install]
+WantedBy=multi-user.target
