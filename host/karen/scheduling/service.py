@@ -288,9 +288,22 @@ class ScheduleService:
 
     async def _start_ring(self, message: str, kind: str) -> None:
         if self._ring_controller:
+            asyncio.create_task(self._announce_ha(message))
             await self._ring_controller.start(message, kind=kind)
             return
         await self._announce(message)
+
+    async def _announce_ha(self, message: str) -> None:
+        ha = HomeAssistantClient(self._ha_cfg)
+        script = self._ha_cfg.get("entities", {}).get("announce_script", "script.karen_announce")
+        ok = await ha.call_service(
+            "script.turn_on",
+            entity_id=script,
+            message=message,
+        )
+        if not ok:
+            await ha.call_service("persistent_notification.create", title="Karen", message=message)
+        log.info("Annuncio HA: %s", message)
 
     async def _announce(self, message: str) -> None:
         if self._voice_announce:

@@ -64,6 +64,7 @@ static void karen_force_idle(const char *reason)
     if (prev == STATE_LISTENING || prev == STATE_RINGING)
         udp_send_end_of_audio();
     i2s_spk_end_playback();
+    audio_board_alarm_stop();
     udp_response_reset();
     udp_response_disarm();
     audio_board_set_duplex_mic(false);
@@ -172,15 +173,22 @@ static void supervisor_task(void *arg)
         if (udp_ring_stop_pending()) {
             udp_ring_clear_stop();
             karen_force_idle("STOP_RING host");
-        } else if (udp_ring_pending() && s_state == STATE_IDLE) {
-            udp_ring_clear_pending();
-            if (s_ww_available) {
-                wake_word_set_active(false);
-                wake_word_reset();
+        } else if (udp_ring_pending()) {
+            if (s_state == STATE_IDLE) {
+                udp_ring_clear_pending();
+                if (s_ww_available) {
+                    wake_word_set_active(false);
+                    wake_word_reset();
+                }
+                audio_board_alarm_start();
+                audio_board_set_duplex_mic(true);
+                udp_response_arm();
+                karen_note_state(STATE_RINGING);
+                udp_ring_set_listen(true);
+                ESP_LOGI(TAG, "Ring: allarme sonoro + ascolto dismiss");
+            } else {
+                udp_ring_clear_pending();
             }
-            udp_response_arm();
-            karen_note_state(STATE_WAITING_RESPONSE);
-            ESP_LOGI(TAG, "Ring: attesa audio host…");
         } else if (udp_push_play_pending() && s_state == STATE_IDLE) {
             udp_push_play_clear();
             if (s_ww_available) {
@@ -352,7 +360,7 @@ static void audio_main_task(void *arg)
             n = i2s_mic_read_mono(mono_frame, (size_t)read_samples);
         }
         if (n <= 0) {
-            if (s_state == STATE_IDLE || s_state == STATE_LISTENING) {
+            if (s_state == STATE_IDLE || s_state == STATE_LISTENING || s_state == STATE_RINGING) {
                 if (++s_mic_fail_streak >= MIC_FAIL_RECOVER_COUNT) {
                     ESP_LOGW(TAG, "Mic fallito %lu volte, recovery…",
                              (unsigned long)s_mic_fail_streak);
@@ -503,7 +511,6 @@ static void audio_main_task(void *arg)
 
             if (end_listen || end_speech) {
                 udp_send_end_of_audio();
-                udp_ring_set_listen(false);
                 ring_listen_reset = true;
                 ESP_LOGI(TAG, "Ring: fine ascolto dismiss (tot=%lums speech=%d)",
                          record_ms, had_speech);
@@ -511,6 +518,10 @@ static void audio_main_task(void *arg)
                 silence_ms = 0;
                 had_speech = false;
                 seq        = 0;
+                if (udp_ring_is_active()) {
+                    vTaskDelay(pdMS_TO_TICKS(400));
+                    udp_ring_set_listen(true);
+                }
             }
             break;
         }

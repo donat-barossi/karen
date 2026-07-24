@@ -72,7 +72,7 @@
 #define STATE_RINGING_MAX_MS       1800000
 #define RING_LISTEN_MS             5000
 #define MIC_FAIL_RECOVER_COUNT     8
-#define SUPERVISOR_INTERVAL_MS     5000
+#define SUPERVISOR_INTERVAL_MS     200
 
 #define SPEAKER_VOLUME        80
 #define WAKE_ACK_BEEP         1

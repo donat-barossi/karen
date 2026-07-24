@@ -1,7 +1,8 @@
 #include "audio_board.h"
 
 #include "esp_check.h"
-#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c_master.h"
@@ -27,6 +28,8 @@ static const audio_codec_data_if_t *s_data_if = NULL;
 static uint32_t                   s_play_rate = AUDIO_SAMPLE_RATE;
 static volatile bool              s_playback_active = false;
 static volatile bool              s_duplex_mic      = false;
+static volatile bool              s_alarm_run       = false;
+static TaskHandle_t               s_alarm_task      = NULL;
 
 static esp_err_t open_out_codec(uint32_t sample_rate)
 {
@@ -378,6 +381,85 @@ esp_err_t audio_board_play_ack_tone(void)
     vTaskDelay(pdMS_TO_TICKS(ms + 30));
     s_playback_active = was_active;
     return ESP_OK;
+}
+
+static void play_tone_ms(int freq_hz, int ms, int amplitude)
+{
+    if (!s_out_dev || ms <= 0)
+        return;
+
+    const int total = (AUDIO_SAMPLE_RATE * ms) / 1000;
+    static int16_t stereo[512];
+
+    for (int pos = 0; pos < total && s_alarm_run; pos += 256) {
+        int cur = total - pos;
+        if (cur > 256)
+            cur = 256;
+        if (cur * 2 > (int)(sizeof(stereo) / sizeof(stereo[0])))
+            break;
+
+        for (int i = 0; i < cur; i++) {
+            int16_t s = (int16_t)(amplitude * sinf(
+                2.0f * (float)M_PI * freq_hz * (pos + i) / AUDIO_SAMPLE_RATE));
+            stereo[i * 2]     = s;
+            stereo[i * 2 + 1] = s;
+        }
+        esp_codec_dev_write(s_out_dev, stereo, cur * 2 * (int)sizeof(int16_t));
+    }
+}
+
+static void alarm_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Allarme sonoro avviato");
+
+    audio_board_set_playback_rate(AUDIO_SAMPLE_RATE);
+    audio_board_pa_enable(true);
+    s_playback_active = true;
+    s_duplex_mic      = true;
+
+    while (s_alarm_run) {
+        play_tone_ms(880, 280, 14000);
+        if (!s_alarm_run)
+            break;
+        vTaskDelay(pdMS_TO_TICKS(120));
+        play_tone_ms(660, 280, 14000);
+        if (!s_alarm_run)
+            break;
+        vTaskDelay(pdMS_TO_TICKS(120));
+    }
+
+    s_playback_active = false;
+    s_duplex_mic      = false;
+    s_alarm_task      = NULL;
+    ESP_LOGI(TAG, "Allarme sonoro fermato");
+    vTaskDelete(NULL);
+}
+
+esp_err_t audio_board_alarm_start(void)
+{
+    if (s_alarm_run)
+        return ESP_OK;
+    if (!s_out_dev)
+        return ESP_ERR_INVALID_STATE;
+
+    s_alarm_run = true;
+    if (xTaskCreatePinnedToCore(alarm_task, "alarm", 4096, NULL, 4,
+                                &s_alarm_task, 1) != pdPASS) {
+        s_alarm_run = false;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+void audio_board_alarm_stop(void)
+{
+    s_alarm_run = false;
+}
+
+bool audio_board_alarm_active(void)
+{
+    return s_alarm_run;
 }
 
 int audio_board_mic_read(int16_t *tdm_out, size_t samples)

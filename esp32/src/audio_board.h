@@ -46,6 +46,14 @@ esp_err_t audio_board_recover_input(void);
 /** Breve tono di conferma wake word (~100 ms). */
 esp_err_t audio_board_play_ack_tone(void);
 
+/** Avvia allarme sonoro locale (beeps alternati) fino a audio_board_alarm_stop(). */
+esp_err_t audio_board_alarm_start(void);
+
+/** Ferma l'allarme sonoro. */
+void audio_board_alarm_stop(void);
+
+bool audio_board_alarm_active(void);
+
 /**
  * Legge campioni dal microfono ES7210 (TDM 4 canali).
  * @param tdm_out   buffer di uscita (4 × samples int16)

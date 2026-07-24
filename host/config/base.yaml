@@ -60,6 +60,5 @@ logging:
 
 schedule:
   data_dir: "data"        # host/data/schedules.json (timer e sveglie multipli)
-  ring_interval_s: 25     # pausa tra ripetizioni allarme
-  ring_listen_s: 5        # secondi in ascolto dismiss dopo ogni suono
+  ring_listen_poll_s: 0.5 # host: polling dismiss mentre ESP suona beep
   ring_dismiss_ack: "Ok!"

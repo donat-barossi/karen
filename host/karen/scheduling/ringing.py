@@ -47,12 +47,11 @@ def is_dismiss_phrase(text: str) -> bool:
 
 
 class RingController:
-    """Suona in loop su ESP32 finché l'utente non dice stop / sono sveglio."""
+    """Allarme sonoro su ESP32 (beeps locali) finché l'utente non dice stop."""
 
     def __init__(self, cfg: dict) -> None:
         sched = cfg.get("schedule", {})
-        self._interval_s = float(sched.get("ring_interval_s", 25))
-        self._listen_s = float(sched.get("ring_listen_s", 5))
+        self._listen_poll_s = float(sched.get("ring_listen_poll_s", 0.5))
         self._dismiss_ack = sched.get("ring_dismiss_ack", "Ok!")
         self._transport: Any = None
         self._active = False
@@ -72,6 +71,7 @@ class RingController:
         return self._dismiss_ack
 
     async def start(self, message: str, kind: str = "timer") -> None:
+        del message  # annuncio vocale = beep ESP; HA gestito dal scheduler
         if self._active or self._transport is None:
             if self._active:
                 log.debug("Ring già attivo, ignoro start (%s)", kind)
@@ -79,8 +79,8 @@ class RingController:
         self._active = True
         self._kind = kind
         self._dismiss_event.clear()
-        self._task = asyncio.create_task(self._loop(message))
-        log.info("Ring avviato (%s): %s", kind, message)
+        self._task = asyncio.create_task(self._loop())
+        log.info("Allarme avviato (%s) → ESP beep immediato", kind)
 
     async def dismiss(self) -> None:
         if not self._active:
@@ -89,43 +89,30 @@ class RingController:
         self._active = False
         self._dismiss_event.set()
 
-    async def _loop(self, message: str) -> None:
+    async def _loop(self) -> None:
         assert self._transport is not None
         server = self._transport
+        dismissed = False
         try:
             await server.start_ring()
             while self._active:
-                play_s = await server.send_ring_audio(message)
-                if not self._active or self._dismiss_event.is_set():
-                    break
-
-                listen_timeout = self._listen_s + play_s + 1.0
                 try:
-                    await asyncio.wait_for(self._dismiss_event.wait(), timeout=listen_timeout)
+                    await asyncio.wait_for(
+                        self._dismiss_event.wait(),
+                        timeout=self._listen_poll_s,
+                    )
+                    dismissed = True
                     break
                 except asyncio.TimeoutError:
-                    pass
-
-                if not self._active or self._dismiss_event.is_set():
-                    break
-
-                # Pausa tra ripetizioni, interrompibile dal dismiss
-                for _ in range(int(self._interval_s * 10)):
-                    if not self._active or self._dismiss_event.is_set():
-                        break
-                    await asyncio.sleep(0.1)
+                    continue
         except asyncio.CancelledError:
             pass
         finally:
             self._active = False
-            if self._transport:
-                await self._transport.stop_ring()
+            await server.stop_ring()
+            if dismissed:
+                await server.send_ring_audio(self._dismiss_ack)
             log.info("Ring terminato (%s)", self._kind)
-
-    async def acknowledge_dismiss(self) -> None:
-        if self._transport is None:
-            return
-        await self._transport.send_ring_audio(self._dismiss_ack)
 
     def notify_dismiss_from_asr(self, text: str) -> bool:
         if not self._active or not is_dismiss_phrase(text):

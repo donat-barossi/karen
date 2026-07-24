@@ -260,8 +260,7 @@ class AudioServer:
         if not text:
             return
         log.info("Ring listen ASR → '%s'", text)
-        if self._ring_controller.notify_dismiss_from_asr(text):
-            await self._ring_controller.acknowledge_dismiss()
+        self._ring_controller.notify_dismiss_from_asr(text)
 
     async def _process_and_respond(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16:
