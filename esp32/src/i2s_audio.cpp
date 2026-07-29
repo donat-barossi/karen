@@ -23,8 +23,13 @@ int i2s_mic_read_dual(int16_t *stereo_out, size_t samples)
 
     // Estrai MIC1 (slot 0) e MIC2 (slot 1) interleaved per AFE dual-mic
     for (int i = 0; i < n; i++) {
+#if WAKE_MIC_SWAP_CHANNELS
+        stereo_out[i * 2]     = s_tdm_buf[i * MIC_TDM_SLOTS + 1];
+        stereo_out[i * 2 + 1] = s_tdm_buf[i * MIC_TDM_SLOTS + 0];
+#else
         stereo_out[i * 2]     = s_tdm_buf[i * MIC_TDM_SLOTS + 0];
         stereo_out[i * 2 + 1] = s_tdm_buf[i * MIC_TDM_SLOTS + 1];
+#endif
     }
     return n;
 }

@@ -51,6 +51,9 @@ Utente: sveglia alle sette lunedì mercoledì e venerdì
 Utente: domani non suonare la sveglia
 {"intent":"alarm","parameters":{"action":"skip_tomorrow"},"response_it":"Ok, domani non suonerà.","ha_service":null,"ha_entity":null}
 
+Utente: annulla tutte le sveglie
+{"intent":"alarm","parameters":{"action":"cancel","all":true},"response_it":"Sveglie disattivate.","ha_service":null,"ha_entity":null}
+
 Utente: cosa ho in calendario domani
 {"intent":"calendar_query","parameters":{"when":"tomorrow"},"response_it":"[SKILL_WILL_FILL]","ha_service":null,"ha_entity":null}
 
@@ -65,7 +68,32 @@ Utente: accendi le luci del salotto
 
 Utente: ciao come stai
 {"intent":"general","parameters":{},"response_it":"Ciao! Sono Karen, come posso aiutarti?","ha_service":null,"ha_entity":null}
+
+Utente: qual è la ricetta della pasta alla carbonara
+{"intent":"recipe","parameters":{"dish":"carbonara"},"response_it":"Per la carbonara servono guanciale, uova, pecorino e pepe. Cuoci la pasta, rosola il guanciale, mescola uova e pecorino, poi amalgama fuori dal fuoco.","ha_service":null,"ha_entity":null}
+
+Regole ricette:
+- intent recipe, response_it in italiano, massimo 4 frasi (risposta vocale breve)
+- NON usare altri campi come ricetta, title, ingredients: solo il formato JSON sopra
 """
+
+RECIPE_PROMPT = """\
+Sei Karen, assistente vocale italiano.
+
+Rispondi con ESATTAMENTE 3 frasi, ognuna chiusa da un punto. Massimo 65 parole totali.
+- Frase 1: ingredienti principali in prosa (es. "Per la carbonara servono spaghetti, guanciale, uova, pecorino e pepe.").
+- Frase 2: cottura (pasta, padella, uova sbattute, ecc.).
+- Frase 3: unione finale fuori dal fuoco e servizio.
+
+VIETATO: elenchi, trattini, numerazione, "ecco i passaggi", intro generiche, inglese.
+
+Esempio:
+Per la carbonara servono spaghetti, guanciale, uova, pecorino e pepe. Cuoci la pasta, rosola il guanciale e sbatti uova con formaggio. Scola, unisci tutto fuori dal fuoco e condisci con pepe.
+"""
+
+RECIPE_USER_SUFFIX = (
+    "\n\nRispondi con esattamente 3 frasi brevi in prosa, senza elenchi né introduzioni generiche."
+)
 
 
 class LLMEngine:
@@ -114,6 +142,53 @@ class LLMEngine:
 
         content = response["choices"][0]["message"]["content"].strip()
         return self._repair_json(content)
+
+    def generate_recipe(self, user_text: str) -> str:
+        """Risposta ricetta in italiano (testo libero, breve per TTS)."""
+        if self._llm is None:
+            raise RuntimeError("LLM non caricato. Chiama load() prima.")
+
+        from .recipes import detect_curated_dish
+        from .tts_text import format_recipe_for_speech, recipe_quality_ok
+
+        user_msg = user_text.strip() + RECIPE_USER_SUFFIX
+        dish = detect_curated_dish(user_text)
+        raw = self._recipe_completion(user_msg)
+        formatted = format_recipe_for_speech(raw)
+        if recipe_quality_ok(formatted, dish=dish):
+            return formatted
+
+        log.warning("Ricetta LLM debole, secondo tentativo: %r", formatted[:100])
+        retry_msg = (
+            f"{user_text.strip()}\n\n"
+            "Solo 3 frasi corte: (1) ingredienti in prosa, (2) cottura, (3) finitura. "
+            "Niente elenchi, niente 'ecco i passaggi'."
+        )
+        raw_retry = self._recipe_completion(retry_msg)
+        formatted_retry = format_recipe_for_speech(raw_retry)
+        if recipe_quality_ok(formatted_retry, dish=dish):
+            return formatted_retry
+        if dish:
+            from .recipes import CURATED_RECIPES
+
+            fallback = CURATED_RECIPES.get(dish)
+            if fallback:
+                log.warning("Ricetta LLM scartata, uso curata per %s", dish)
+                return format_recipe_for_speech(fallback)
+        return formatted_retry if formatted_retry.strip() else formatted
+
+    def _recipe_completion(self, user_msg: str) -> str:
+        response = self._llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": RECIPE_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=self._cfg.get("recipe_max_tokens", 180),
+            temperature=self._cfg.get("recipe_temperature", 0.05),
+            top_p=self._cfg.get("top_p", 0.9),
+            stop=["<|end|>", "<|endoftext|>", "\n\nUtente:", "\n\n"],
+        )
+        return response["choices"][0]["message"]["content"].strip()
 
     @staticmethod
     def _repair_json(raw: str) -> str:

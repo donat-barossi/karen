@@ -48,9 +48,14 @@
 #define AFE_CHUNK_SAMPLES   1024   // chunksize AFE dual-mic (get_feed_chunksize)
 #define UDP_CHUNK_SAMPLES   512
 #define UDP_CHUNK_BYTES     (UDP_CHUNK_SAMPLES * sizeof(int16_t))
+#define MAX_RESPONSE_PKTS   2048
 
 // ── Wake word ────────────────────────────────────────────────────────────────
 #define WAKEWORD_MODEL_NAME "wn9_heykira_tts3"
+#define WAKE_MIC_GAIN_DB        42.0f
+#define WAKENET_THRESHOLD       0.52f
+#define WAKENET_DET_MODE        3
+#define WAKE_MIC_SWAP_CHANNELS  0
 
 // ── VAD – rilevamento fine frase ─────────────────────────────────────────────
 #define VAD_SPEECH_THRESHOLD    700
@@ -75,7 +80,15 @@
 #define SUPERVISOR_INTERVAL_MS     200
 
 #define SPEAKER_VOLUME        80
-#define WAKE_ACK_BEEP         1
+
+#define WAKE_ACK_BEEP         0
+
+#define WAKE_ACK_LED          1
+#define WAKE_LED_GPIO         38
+#define WAKE_LED_COUNT        7
+#define WAKE_LED_BRIGHTNESS   220
+#define WAKE_LED_CHASE_TAIL   3
+#define WAKE_LED_CHASE_MS     90
 
 #define PACKET_MAGIC            0x4B41524E
 #define PKT_TYPE_AUDIO          0x01
@@ -85,3 +98,4 @@
 #define PKT_TYPE_ERROR          0x05
 #define PKT_TYPE_START_RING     0x06
 #define PKT_TYPE_STOP_RING      0x07
+#define PKT_TYPE_LISTEN_AGAIN   0x08

@@ -5,12 +5,14 @@ idf_component_register(
         "i2s_audio.cpp"
         "wake_word.cpp"
         "udp_transport.cpp"
+        "status_led.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp-sr
         esp_codec_dev
         esp_io_expander
         esp_io_expander_tca95xx_16bit
+        led_strip
         driver
         nvs_flash
         esp_wifi

@@ -15,7 +15,7 @@ import struct
 import time
 from typing import TYPE_CHECKING, Any
 
-from .pipeline import ESP32_SAMPLE_RATE
+from .pipeline import ESP32_SAMPLE_RATE, PipelineResult
 from .audio_util import normalize_pcm16, resample_pcm16
 
 if TYPE_CHECKING:
@@ -32,6 +32,7 @@ PKT_END_RESPONSE = 0x04
 PKT_ERROR = 0x05
 PKT_START_RING = 0x06
 PKT_STOP_RING = 0x07
+PKT_LISTEN_AGAIN = 0x08
 
 HEADER_SIZE = 8  # magic(4) + type(1) + reserved(1) + seq(2)
 
@@ -269,7 +270,7 @@ class AudioServer:
 
         async with self._process_lock:
             try:
-                response_pcm = await self._pipeline.process(audio_pcm16)
+                result = await self._pipeline.process(audio_pcm16)
             except Exception as e:
                 log.exception("Errore pipeline: %s", e)
                 response_pcm = self._pipeline.tts.synthesize(
@@ -282,8 +283,12 @@ class AudioServer:
                         ESP32_SAMPLE_RATE,
                     )
                 )
+                result = PipelineResult(response_pcm, listen_again=False)
 
-            await self._send_audio_response(response_pcm)
+            await self._send_audio_response(result.audio)
+            if result.listen_again:
+                await self._send_control(PKT_LISTEN_AGAIN)
+                log.info("Richiesto ascolto ripetizione → ESP32 (no wake word)")
 
     async def _send_audio_response(self, audio_pcm16: bytes, *, push: bool = False) -> None:
         if self._transport is None:
@@ -295,6 +300,15 @@ class AudioServer:
         chunk_bytes = chunk_samples * 2
         seq = 0
         chunk_duration_s = chunk_samples / ESP32_SAMPLE_RATE
+        max_packets = 2048  # allineato a MAX_RESPONSE_PKTS su ESP32
+        total_packets = (len(audio_pcm16) + chunk_bytes - 1) // chunk_bytes
+        if total_packets > max_packets:
+            log.error(
+                "Audio troppo lungo: %d pacchetti (max %d, ~%.0f s persi)",
+                total_packets,
+                max_packets,
+                (total_packets - max_packets) * chunk_duration_s,
+            )
 
         for offset in range(0, len(audio_pcm16), chunk_bytes):
             chunk = audio_pcm16[offset : offset + chunk_bytes]

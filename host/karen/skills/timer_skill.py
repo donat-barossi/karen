@@ -24,6 +24,30 @@ _NUM_WORD = (
     r"undici|dodici|quindici|venti|trenta|quaranta|cinquanta|sessanta"
 )
 
+_ALARM_KW = re.compile(r"\bsvegl\w*", re.I)
+_CANCEL_ALARM_VERBS = (
+    "annulla", "annull", "a nulla", "anulla", "cancella", "disattiva",
+    "elimina", "ferma", "stop", "togli", "rimuovi",
+)
+_TIME_INTRO = r"(?:alle|per le|ore|alle ore)\s*"
+_ITALIAN_HOUR_WORDS: dict[str, int] = {
+    "una": 1, "uno": 1, "due": 2, "tre": 3, "quattro": 4,
+    "cinque": 5, "sei": 6, "sette": 7, "otto": 8, "nove": 9,
+    "dieci": 10, "undici": 11, "dodici": 12,
+}
+_HOUR_WORD_PAT = "|".join(sorted(_ITALIAN_HOUR_WORDS, key=len, reverse=True))
+_ALARM_ECHO_RE = re.compile(
+    r"\b(?:impostata|impostato|programmata|programmato|annullata|annullato)\b",
+    re.I,
+)
+
+
+def _looks_like_alarm_echo(text: str) -> bool:
+    """Ignora frasi di risposta TTS riascoltate dal microfono."""
+    if _ALARM_ECHO_RE.search(text):
+        return True
+    return bool(re.search(r"\bsveglia-\d+\b", text, re.I))
+
 
 def _italian_number(token: str) -> int | None:
     token = token.lower().strip()
@@ -105,13 +129,23 @@ class TimerSkill(BaseSkill):
                 return "Ok, salto la prossima occorrenza. La ricorrenza resta attiva."
 
             if action in ("cancel", "disable"):
+                if params.get("all"):
+                    n = sched.disable_all_alarms()
+                    if n == 0:
+                        return "Non hai sveglie attive."
+                    if n == 1:
+                        return "Sveglia disattivata."
+                    return f"{n} sveglie disattivate."
                 ok = sched.disable_alarm(
                     alarm_id=params.get("alarm_id", ""),
                     name=params.get("name", ""),
                 )
                 return "Sveglia disattivata." if ok else "Non ho trovato la sveglia."
 
-            hour = int(params.get("hour", 7))
+            if "hour" not in params:
+                return "A che ora vuoi la sveglia?"
+
+            hour = int(params["hour"])
             minute = int(params.get("minute", 0))
             days = params.get("days")
             if isinstance(days, list) and days:
@@ -160,7 +194,7 @@ def parse_timer_duration(text: str) -> int | None:
 
 def parse_alarm_time(text: str) -> tuple[int, int] | None:
     t = text.lower()
-    if not any(w in t for w in ("sveglia", "svegliami")):
+    if not _ALARM_KW.search(t) or _looks_like_alarm_echo(t):
         return None
 
     m = re.search(r"(\d{1,2})[:.](\d{2})", t)
@@ -171,32 +205,49 @@ def parse_alarm_time(text: str) -> tuple[int, int] | None:
     if m:
         return int(m.group(1)), 30
 
-    m = re.search(r"(?:alle|per le|ore)\s*(\d{1,2})(?:\s*(?:e\s*)?(\d{2}))?", t)
+    m = re.search(rf"{_TIME_INTRO}(\d{{1,2}})(?:\s*(?:e\s*)?(\d{{2}}))?", t)
     if m:
         hour = int(m.group(1))
         minute = int(m.group(2)) if m.group(2) else 0
         return hour, minute
 
-    words = {
-        "una": 1, "uno": 1, "due": 2, "tre": 3, "quattro": 4,
-        "cinque": 5, "sei": 6, "sette": 7, "otto": 8, "nove": 9,
-        "dieci": 10, "undici": 11, "dodici": 12,
-    }
-    for w, h in words.items():
-        if w in t:
-            return h, 0
+    m = re.search(
+        rf"{_TIME_INTRO}({_HOUR_WORD_PAT})(?:\s*(?:e\s*)?(quindici|trenta|(\d{{2}})))?",
+        t,
+    )
+    if m:
+        hour = _ITALIAN_HOUR_WORDS[m.group(1)]
+        minute_raw = m.group(2) or m.group(3)
+        if minute_raw in ("quindici", "trenta"):
+            minute = 15 if minute_raw == "quindici" else 30
+        elif minute_raw:
+            minute = int(minute_raw)
+        else:
+            minute = 0
+        return hour, minute
+
     return None
 
 
 def parse_alarm_intent(text: str) -> dict[str, Any] | None:
     t = text.lower()
+    if _looks_like_alarm_echo(t):
+        return None
+
+    if _ALARM_KW.search(t) and any(v in t for v in _CANCEL_ALARM_VERBS):
+        cancel_all = any(w in t for w in ("tutte", "tutti", "svegl"))
+        return {"intent": "alarm", "parameters": {"action": "cancel", "all": cancel_all}}
+
     if any(p in t for p in ("domani non suonare", "non suonare domani", "salta domani", "salta la sveglia domani")):
         return {"intent": "alarm", "parameters": {"action": "skip_tomorrow"}}
 
     if any(p in t for p in ("salta prossima", "prossima sveglia", "salta la prossima")):
         return {"intent": "alarm", "parameters": {"action": "skip_next"}}
 
-    if any(p in t for p in ("quali sveglie", "mostra sveglie", "sveglie attive")):
+    if any(p in t for p in (
+        "quali sveglie", "mostra sveglie", "sveglie attive",
+        "che sveglie", "che sveglia", "sveglie impostate", "sveglie ci sono",
+    )):
         return {"intent": "alarm", "parameters": {"action": "list"}}
 
     time = parse_alarm_time(t)

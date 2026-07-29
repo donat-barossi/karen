@@ -3,8 +3,6 @@
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/i2s_tdm.h"
@@ -251,7 +249,7 @@ static esp_err_t codecs_init(void)
         .bits_per_sample = AUDIO_BITS,
     };
     ESP_RETURN_ON_ERROR(esp_codec_dev_open(s_in_dev, &in_fs), TAG, "es7210 open");
-    ESP_RETURN_ON_ERROR(esp_codec_dev_set_in_gain(s_in_dev, 36.0), TAG, "es7210 gain");
+    ESP_RETURN_ON_ERROR(esp_codec_dev_set_in_gain(s_in_dev, WAKE_MIC_GAIN_DB), TAG, "es7210 gain");
 
     return ESP_OK;
 }
@@ -355,12 +353,64 @@ esp_err_t audio_board_recover_input(void)
     return ESP_OK;
 }
 
+static void play_tone_ms(int freq_hz, int ms, int amplitude)
+{
+    if (!s_out_dev || ms <= 0)
+        return;
+
+    const int total = (AUDIO_SAMPLE_RATE * ms) / 1000;
+    static int16_t stereo[512];
+
+    for (int pos = 0; pos < total; pos += 256) {
+        int cur = total - pos;
+        if (cur > 256)
+            cur = 256;
+        if (cur * 2 > (int)(sizeof(stereo) / sizeof(stereo[0])))
+            break;
+
+        for (int i = 0; i < cur; i++) {
+            int16_t s = (int16_t)(amplitude * sinf(
+                2.0f * (float)M_PI * freq_hz * (pos + i) / AUDIO_SAMPLE_RATE));
+            stereo[i * 2]     = s;
+            stereo[i * 2 + 1] = s;
+        }
+        esp_codec_dev_write(s_out_dev, stereo, cur * 2 * (int)sizeof(int16_t));
+    }
+}
+
+static void wake_ack_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGD(TAG, "Wake ack bip");
+
+    audio_board_set_playback_rate(AUDIO_SAMPLE_RATE);
+    audio_board_pa_enable(true);
+    s_playback_active = true;
+
+    play_tone_ms(WAKE_ACK_FREQ_HZ, WAKE_ACK_MS, WAKE_ACK_AMP);
+    vTaskDelay(pdMS_TO_TICKS(40));
+    play_tone_ms(WAKE_ACK_FREQ_HZ, WAKE_ACK_MS, WAKE_ACK_AMP);
+
+    s_playback_active = false;
+    vTaskDelete(NULL);
+}
+
+void audio_board_wake_ack(void)
+{
+#if !WAKE_ACK_BEEP
+    return;
+#endif
+    if (!s_out_dev)
+        return;
+    xTaskCreatePinnedToCore(wake_ack_task, "wake_ack", 3072, NULL, 4, NULL, 1);
+}
+
 esp_err_t audio_board_play_ack_tone(void)
 {
     if (!s_out_dev) return ESP_ERR_INVALID_STATE;
 
-    const int freq_hz = 880;
-    const int ms      = 150;
+    const int freq_hz = WAKE_ACK_FREQ_HZ;
+    const int ms      = WAKE_ACK_MS;
     const int n       = (AUDIO_SAMPLE_RATE * ms) / 1000;
     static int16_t stereo[512];
 
@@ -372,7 +422,7 @@ esp_err_t audio_board_play_ack_tone(void)
     s_playback_active = true;
 
     for (int i = 0; i < n; i++) {
-        int16_t s = (int16_t)(12000.0f * sinf(2.0f * (float)M_PI * freq_hz * i / AUDIO_SAMPLE_RATE));
+        int16_t s = (int16_t)(WAKE_ACK_AMP * sinf(2.0f * (float)M_PI * freq_hz * i / AUDIO_SAMPLE_RATE));
         stereo[i * 2]     = s;
         stereo[i * 2 + 1] = s;
     }
@@ -383,7 +433,7 @@ esp_err_t audio_board_play_ack_tone(void)
     return ESP_OK;
 }
 
-static void play_tone_ms(int freq_hz, int ms, int amplitude)
+static void play_tone_ms_alarm(int freq_hz, int ms, int amplitude)
 {
     if (!s_out_dev || ms <= 0)
         return;
@@ -419,11 +469,11 @@ static void alarm_task(void *arg)
     s_duplex_mic      = true;
 
     while (s_alarm_run) {
-        play_tone_ms(880, 280, 14000);
+        play_tone_ms_alarm(880, 280, 14000);
         if (!s_alarm_run)
             break;
         vTaskDelay(pdMS_TO_TICKS(120));
-        play_tone_ms(660, 280, 14000);
+        play_tone_ms_alarm(660, 280, 14000);
         if (!s_alarm_run)
             break;
         vTaskDelay(pdMS_TO_TICKS(120));

@@ -258,6 +258,16 @@ class ScheduleService:
             return True
         return False
 
+    def disable_all_alarms(self) -> int:
+        count = 0
+        for alarm in self._data["alarms"]:
+            if alarm.get("enabled", True):
+                alarm["enabled"] = False
+                count += 1
+        if count:
+            self._persist()
+        return count
+
     def describe_alarms(self) -> str:
         alarms = self.list_alarms()
         if not alarms:

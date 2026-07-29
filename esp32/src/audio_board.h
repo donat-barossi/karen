@@ -46,6 +46,9 @@ esp_err_t audio_board_recover_input(void);
 /** Breve tono di conferma wake word (~100 ms). */
 esp_err_t audio_board_play_ack_tone(void);
 
+/** Doppio bip breve al wake word (non blocca il task audio). */
+void audio_board_wake_ack(void);
+
 /** Avvia allarme sonoro locale (beeps alternati) fino a audio_board_alarm_stop(). */
 esp_err_t audio_board_alarm_start(void);
 

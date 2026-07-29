@@ -31,13 +31,16 @@ asr:
   beam_size: 3
   vad_filter: false
   condition_on_previous_text: false
-  initial_prompt: "Che ore sono. Timer cinque minuti. Sveglia alle sette. Cosa ho in calendario domani."
+  # Prompt neutro: esempi di comandi causavano allucinazioni ASR ("Sveglia alle sette").
+  initial_prompt: "Conversazione in italiano con un assistente vocale domestico."
 
 llm:
   model_path: "phi3-mini-4k-q4_k_m.gguf"
   n_gpu_layers: -1
   context_length: 2048
-  max_tokens: 128
+  max_tokens: 256
+  recipe_max_tokens: 180
+  recipe_temperature: 0.05
   temperature: 0.1
   top_p: 0.9
 
@@ -62,3 +65,6 @@ schedule:
   data_dir: "data"        # host/data/schedules.json (timer e sveglie multipli)
   ring_listen_poll_s: 0.5 # host: polling dismiss mentre ESP suona beep
   ring_dismiss_ack: "Ok!"
+
+pipeline:
+  clarify_max_retries: 2

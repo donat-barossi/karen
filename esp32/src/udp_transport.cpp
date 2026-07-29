@@ -19,8 +19,6 @@ typedef struct __attribute__((packed)) {
     uint16_t seq;
 } karn_header_t;
 
-#define MAX_RESPONSE_PKTS 512
-
 typedef struct {
     int16_t  data[UDP_CHUNK_SAMPLES];
     uint16_t nsamples;
@@ -40,6 +38,7 @@ static volatile bool    s_ring_pending = false;
 static volatile bool    s_ring_stop    = false;
 static volatile bool    s_ring_listen  = false;
 static volatile bool    s_push_play_pending = false;
+static volatile bool    s_listen_again_pending = false;
 static SemaphoreHandle_t s_pkt_sem    = NULL;
 static size_t           s_pkts_recv   = 0;
 
@@ -183,6 +182,11 @@ static void udp_recv_task(void *arg)
             s_ring_stop    = true;
             udp_response_disarm();
             ESP_LOGI(TAG, "RX STOP_RING → ring fermato");
+            continue;
+        }
+        if (pkt_type == PKT_TYPE_LISTEN_AGAIN) {
+            s_listen_again_pending = true;
+            ESP_LOGI(TAG, "RX LISTEN_AGAIN → ripetizione senza wake word");
             continue;
         }
 
@@ -423,6 +427,16 @@ bool udp_push_play_pending(void)
 void udp_push_play_clear(void)
 {
     s_push_play_pending = false;
+}
+
+bool udp_listen_again_pending(void)
+{
+    return s_listen_again_pending;
+}
+
+void udp_listen_again_clear(void)
+{
+    s_listen_again_pending = false;
 }
 
 void udp_transport_deinit(void)

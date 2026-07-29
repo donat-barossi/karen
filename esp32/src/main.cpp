@@ -23,6 +23,7 @@
 #include "wake_word.h"
 #include "udp_transport.h"
 #include "audio_board.h"
+#include "status_led.h"
 
 static const char *TAG = "karen_main";
 
@@ -37,6 +38,7 @@ typedef enum {
 static volatile karen_state_t s_state = STATE_IDLE;
 static bool s_ww_available = false;
 static volatile bool s_session_abort = false;
+static volatile bool s_listen_reset = false;
 static TickType_t s_state_since = 0;
 static uint32_t s_mic_fail_streak = 0;
 
@@ -73,8 +75,26 @@ static void karen_force_idle(const char *reason)
         wake_word_reset();
     }
     audio_board_recover_input();
+    status_led_listening_off();
     karen_note_state(STATE_IDLE);
     s_mic_fail_streak = 0;
+}
+
+static void karen_abort_listen_idle(const char *reason)
+{
+    ESP_LOGI(TAG, "%s", reason);
+    status_led_listening_off();
+    udp_response_disarm();
+    karen_note_state(STATE_IDLE);
+    if (s_ww_available)
+        wake_word_set_active(true);
+}
+
+static void karen_begin_listening(void)
+{
+    udp_response_arm();
+    status_led_listening_on();
+    karen_note_state(STATE_LISTENING);
 }
 
 // ── Wi-Fi ────────────────────────────────────────────────────────────────────
@@ -320,11 +340,20 @@ static void playback_task(void *arg)
             karen_note_state(STATE_RINGING);
             udp_ring_set_listen(true);
             ESP_LOGI(TAG, "Ring: ascolto dismiss (no wake word)…");
+        } else if (udp_listen_again_pending()) {
+            udp_listen_again_clear();
+            audio_board_set_duplex_mic(false);
+            s_listen_reset = true;
+            karen_begin_listening();
+            if (s_ww_available)
+                wake_word_set_active(false);
+            ESP_LOGI(TAG, "Ascolto ripetizione (no wake word)…");
         } else {
             udp_response_disarm();
             karen_note_state(STATE_IDLE);
             s_session_abort = false;
-            if (s_ww_available) wake_word_set_active(true);
+            if (s_ww_available)
+                wake_word_set_active(true);
         }
     }
 }
@@ -407,11 +436,7 @@ static void audio_main_task(void *arg)
                     wake_word_set_active(false);
                     wake_word_reset();
                 }
-#if WAKE_ACK_BEEP
-                audio_board_play_ack_tone();
-#endif
-                udp_response_arm();
-                karen_note_state(STATE_LISTENING);
+                karen_begin_listening();
                 seq         = 0;
                 silence_ms  = 0;
                 record_ms   = 0;
@@ -421,6 +446,13 @@ static void audio_main_task(void *arg)
         }
 
         case STATE_LISTENING: {
+            if (s_listen_reset) {
+                seq         = 0;
+                silence_ms  = 0;
+                record_ms   = 0;
+                had_speech  = false;
+                s_listen_reset = false;
+            }
             // Streaming mono (MIC1) al Jetson – invia in chunk UDP da 512
             if (ww_available) {
                 for (int i = 0; i < n; i++)
@@ -453,8 +485,21 @@ static void audio_main_task(void *arg)
                                   silence_ms >= VAD_SILENCE_MS;
             bool end_on_max = record_ms >= VAD_MAX_RECORD_MS;
             bool end_on_host = udp_response_packets_received() > 0;
+            bool end_no_speech = !had_speech &&
+                                 record_ms >= LISTEN_NO_SPEECH_IDLE_MS &&
+                                 !end_on_host;
+
+            if (end_no_speech) {
+                karen_abort_listen_idle("Ascolto: silenzio, ritorno IDLE");
+                seq        = 0;
+                silence_ms = 0;
+                record_ms  = 0;
+                had_speech = false;
+                break;
+            }
 
             if (end_on_silence || end_on_max || end_on_host) {
+                status_led_listening_off();
                 udp_send_end_of_audio();
                 if (end_on_host) {
                     ESP_LOGI(TAG,
@@ -550,6 +595,7 @@ extern "C" void app_main(void)
     wifi_init();
 
     ESP_ERROR_CHECK(i2s_audio_init());
+    status_led_init();
 
     gpio_config_t btn_cfg = {
         .pin_bit_mask = (1ULL << WAKE_BUTTON_GPIO),

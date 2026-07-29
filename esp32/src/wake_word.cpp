@@ -72,7 +72,7 @@ esp_err_t wake_word_init(void)
     ESP_LOGI(TAG, "WakeNet model: %s", s_model_name);
 
     // "MM" = dual-mic (array ES7210 sulla Waveshare)
-    afe_config_t *afe_cfg = afe_config_init("MM", s_models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+    afe_config_t *afe_cfg = afe_config_init("MM", s_models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
     if (!afe_cfg) {
         ESP_LOGE(TAG, "afe_config_init fallita");
         return ESP_FAIL;
@@ -88,10 +88,10 @@ esp_err_t wake_word_init(void)
     afe_cfg->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
     afe_cfg->afe_perferred_core     = 0;
     afe_cfg->afe_perferred_priority = 5;
-    afe_cfg->afe_ringbuf_size       = 100;
+    afe_cfg->afe_ringbuf_size       = 150;
     afe_cfg->wakenet_init       = true;
     afe_cfg->wakenet_model_name = s_model_name;
-    afe_cfg->wakenet_mode       = DET_MODE_90;
+    afe_cfg->wakenet_mode       = (det_mode_t)WAKENET_DET_MODE;
 
     afe_config_check(afe_cfg);
 
@@ -106,6 +106,13 @@ esp_err_t wake_word_init(void)
     if (!s_afe_data) {
         ESP_LOGE(TAG, "AFE create_from_config fallita");
         return ESP_FAIL;
+    }
+
+    if (s_afe_handle->set_wakenet_threshold) {
+        int thr_ret = s_afe_handle->set_wakenet_threshold(
+            s_afe_data, 1, WAKENET_THRESHOLD);
+        ESP_LOGI(TAG, "WakeNet threshold=%.2f mode=%d (ret=%d)",
+                 WAKENET_THRESHOLD, WAKENET_DET_MODE, thr_ret);
     }
 
     s_chunksize = s_afe_handle->get_feed_chunksize(s_afe_data);
