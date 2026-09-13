@@ -39,6 +39,7 @@ static volatile bool    s_ring_stop    = false;
 static volatile bool    s_ring_listen  = false;
 static volatile bool    s_push_play_pending = false;
 static volatile bool    s_listen_again_pending = false;
+static volatile bool    s_playback_abort = false;
 static SemaphoreHandle_t s_pkt_sem    = NULL;
 static size_t           s_pkts_recv   = 0;
 
@@ -50,6 +51,8 @@ typedef struct {
 } udp_tx_job_t;
 
 static QueueHandle_t    s_tx_queue    = NULL;
+
+static uint32_t s_send_fail_count = 0;
 
 static bool _send_packet(uint8_t type, uint16_t seq,
                           const void *payload, size_t payload_len)
@@ -69,6 +72,11 @@ static bool _send_packet(uint8_t type, uint16_t seq,
 
     ssize_t sent = sendto(s_tx_sock, pkt, total, 0,
                           (struct sockaddr *)&s_jetson_addr, sizeof(s_jetson_addr));
+    if (sent != (ssize_t)total) {
+        s_send_fail_count++;
+        if (s_send_fail_count <= 5 || (s_send_fail_count % 50) == 0)
+            ESP_LOGW(TAG, "sendto fallito errno=%d (tot=%u)", errno, s_send_fail_count);
+    }
     return sent == (ssize_t)total;
 }
 
@@ -83,13 +91,11 @@ static void udp_tx_task(void *arg)
         if (xQueueReceive(s_tx_queue, &job, portMAX_DELAY) != pdTRUE)
             continue;
 
-        if (job.is_end) {
-            _send_packet(PKT_TYPE_END_AUDIO, 0, NULL, 0);
-            ESP_LOGD(TAG, "TX END_AUDIO");
-        } else if (job.data && job.nsamples > 0) {
+        if (job.data && job.nsamples > 0) {
             _send_packet(PKT_TYPE_AUDIO, job.seq, job.data,
                           job.nsamples * sizeof(int16_t));
-            vTaskDelay(pdMS_TO_TICKS(UDP_TX_PACE_MS));
+            if (UDP_TX_PACE_MS > 0)
+                vTaskDelay(pdMS_TO_TICKS(UDP_TX_PACE_MS));
         }
 
         if (job.data)
@@ -180,13 +186,17 @@ static void udp_recv_task(void *arg)
             s_ring_active  = false;
             s_ring_listen  = false;
             s_ring_stop    = true;
-            udp_response_disarm();
             ESP_LOGI(TAG, "RX STOP_RING → ring fermato");
             continue;
         }
         if (pkt_type == PKT_TYPE_LISTEN_AGAIN) {
             s_listen_again_pending = true;
             ESP_LOGI(TAG, "RX LISTEN_AGAIN → ripetizione senza wake word");
+            continue;
+        }
+        if (pkt_type == PKT_TYPE_ABORT_PLAYBACK) {
+            s_playback_abort = true;
+            ESP_LOGI(TAG, "RX ABORT_PLAYBACK → interruzione TTS");
             continue;
         }
 
@@ -306,15 +316,34 @@ bool udp_send_audio(const int16_t *audio_pcm16, size_t samples, uint16_t seq)
     return _tx_enqueue(&job);
 }
 
+void udp_wait_tx_drain(uint32_t timeout_ms)
+{
+    if (!s_tx_queue)
+        return;
+    uint32_t waited = 0;
+    while (uxQueueMessagesWaiting(s_tx_queue) > 0 && waited < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        waited += 5;
+    }
+}
+
 bool udp_send_end_of_audio(void)
 {
-    udp_tx_job_t job = {
-        .seq      = 0,
-        .nsamples = 0,
-        .is_end   = true,
-        .data     = NULL,
-    };
-    return _tx_enqueue(&job);
+    udp_wait_tx_drain(8000);
+    bool ok = _send_packet(PKT_TYPE_END_AUDIO, 0, NULL, 0);
+    if (ok)
+        ESP_LOGI(TAG, "TX END_AUDIO");
+    else
+        ESP_LOGW(TAG, "TX END_AUDIO fallito");
+    return ok;
+}
+
+bool udp_send_ring_dismiss(void)
+{
+    bool ok = _send_packet(PKT_TYPE_RING_DISMISS, 0, NULL, 0);
+    if (ok)
+        ESP_LOGI(TAG, "TX RING_DISMISS → Jetson");
+    return ok;
 }
 
 void udp_response_reset(void)
@@ -437,6 +466,31 @@ bool udp_listen_again_pending(void)
 void udp_listen_again_clear(void)
 {
     s_listen_again_pending = false;
+}
+
+bool udp_playback_abort_pending(void)
+{
+    if (!s_playback_abort)
+        return false;
+    s_playback_abort = false;
+    return true;
+}
+
+bool udp_send_log_line(const char *line)
+{
+    if (!line || s_tx_sock < 0)
+        return false;
+    size_t len = strlen(line);
+    if (len == 0)
+        return false;
+    if (len > REMOTE_LOG_MAX_LEN)
+        len = REMOTE_LOG_MAX_LEN;
+    return _send_packet(PKT_TYPE_LOG, 0, line, len);
+}
+
+uint32_t udp_get_tx_fail_count(void)
+{
+    return s_send_fail_count;
 }
 
 void udp_transport_deinit(void)

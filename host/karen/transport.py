@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING, Any
 
 from .pipeline import ESP32_SAMPLE_RATE, PipelineResult
 from .audio_util import normalize_pcm16, resample_pcm16
+from .esp32_log import Esp32LogWriter
 
 if TYPE_CHECKING:
+    from .health import RuntimeWatchdog
     from .pipeline import KarenPipeline
 
 log = logging.getLogger(__name__)
@@ -33,6 +35,9 @@ PKT_ERROR = 0x05
 PKT_START_RING = 0x06
 PKT_STOP_RING = 0x07
 PKT_LISTEN_AGAIN = 0x08
+PKT_RING_DISMISS = 0x09
+PKT_LOG = 0x0A
+PKT_ABORT_PLAYBACK = 0x0B
 
 HEADER_SIZE = 8  # magic(4) + type(1) + reserved(1) + seq(2)
 
@@ -137,6 +142,9 @@ class AudioServer:
         esp32_port: int,
         pipeline: "KarenPipeline",
         stream_cfg: dict | None = None,
+        esp32_log: Esp32LogWriter | None = None,
+        watchdog: "RuntimeWatchdog | None" = None,
+        process_lock: asyncio.Lock | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -147,17 +155,51 @@ class AudioServer:
         cfg = stream_cfg or {}
         self._vad_threshold = int(cfg.get("vad_threshold", 300))
         self._vad_silence_ms = int(cfg.get("vad_silence_ms", 700))
+        self._ring_vad_silence_ms = int(cfg.get("ring_vad_silence_ms", 350))
+        self._ring_min_duration_s = float(cfg.get("ring_min_duration_s", 0.12))
         self._min_duration_s = float(cfg.get("min_duration_s", 0.5))
+        self._post_ring_quiet_s = float(cfg.get("post_ring_quiet_s", 1.5))
 
         self._stream: UploadStream | None = None
         self._transport: asyncio.DatagramTransport | None = None
         self._stream_lock = asyncio.Lock()
-        self._process_lock = asyncio.Lock()
+        self._process_lock = process_lock or asyncio.Lock()
         self._ring_mode = False
+        self._post_ring_quiet_until = 0.0
         self._ring_controller: Any = None
+        self._esp32_log = esp32_log
+        self._watchdog = watchdog
+        self._abort_playback = asyncio.Event()
+        self._speaking = False
+        self._session_id = 0
+
+    def _cancel_esp_upload(self, reason: str) -> None:
+        if self._stream is None or self._stream.finalized:
+            return
+        duration_s = self._stream.duration_s()
+        self._stream.finalized = True
+        self._stream.active = False
+        self._stream = None
+        log.info("Upload ESP annullato (%s, %.1f s buffered)", reason, duration_s)
+
+    def bump_session(self, reason: str) -> None:
+        """Invalida TTS in corso verso ESP32 (nuova sessione vocale)."""
+        self._bump_session(reason)
+
+    def _bump_session(self, reason: str) -> None:
+        self._session_id += 1
+        self._abort_playback.set()
+        log.info("Nuova sessione vocale (%s) → id=%d", reason, self._session_id)
 
     def set_ring_controller(self, ring: Any) -> None:
         self._ring_controller = ring
+
+    async def abort_playback(self) -> None:
+        """Interrompe TTS in invio verso ESP32."""
+        if not self._speaking:
+            return
+        self._abort_playback.set()
+        await self._send_control(PKT_ABORT_PLAYBACK)
 
     async def start_ring(self) -> None:
         self._ring_mode = True
@@ -165,9 +207,14 @@ class AudioServer:
         log.info("Modalità ring avviata → ESP32")
 
     async def stop_ring(self) -> None:
-        self._ring_mode = False
-        await self._send_control(PKT_STOP_RING)
-        log.info("Modalità ring fermata → ESP32")
+        if self._ring_mode:
+            self._ring_mode = False
+            self._post_ring_quiet_until = time.monotonic() + self._post_ring_quiet_s
+            await self._send_control(PKT_STOP_RING)
+            log.info("Modalità ring fermata → ESP32 (cooldown %.0fs)", self._post_ring_quiet_s)
+        elif time.monotonic() < self._post_ring_quiet_until:
+            await self._send_control(PKT_STOP_RING)
+            log.debug("STOP_RING ridondante (cooldown attivo)")
 
     async def send_audio(self, audio_pcm16: bytes) -> None:
         """Invia audio TTS all'ESP32 (timer/sveglia da idle)."""
@@ -199,6 +246,22 @@ class AudioServer:
     async def handle_packet(
         self, pkt_type: int, seq: int, payload: bytes, addr: tuple[str, int]
     ) -> None:
+        if self._watchdog is not None:
+            self._watchdog.note_esp_activity()
+
+        if pkt_type == PKT_LOG:
+            if self._esp32_log:
+                try:
+                    msg = payload.decode("utf-8", errors="replace")
+                except Exception:
+                    msg = repr(payload)
+                self._esp32_log.write(addr[0], msg)
+            return
+
+        if pkt_type == PKT_RING_DISMISS:
+            await self._handle_ring_dismiss("udp")
+            return
+
         async with self._stream_lock:
             if pkt_type == PKT_AUDIO:
                 if self._stream is not None and self._stream.finalized:
@@ -206,6 +269,7 @@ class AudioServer:
 
                 if self._stream is None or not self._stream.active:
                     log.info("Inizio upload stream da %s", addr)
+                    self._bump_session("upload")
                     self._reply_addr = (addr[0], self._esp32_addr[1])
                     self._stream = UploadStream(addr)
 
@@ -221,7 +285,11 @@ class AudioServer:
                         len(audio) / (ESP32_SAMPLE_RATE * 2),
                         len(audio),
                     )
-                    if self._ring_mode:
+                    if (
+                        self._ring_mode
+                        and self._ring_controller
+                        and self._ring_controller.is_active
+                    ):
                         asyncio.ensure_future(self._process_ring_upload(audio))
                     else:
                         asyncio.ensure_future(self._process_and_respond(audio))
@@ -240,35 +308,92 @@ class AudioServer:
                     len(audio) / (ESP32_SAMPLE_RATE * 2),
                     len(audio),
                 )
-                if self._ring_mode:
+                if self._ring_mode and self._ring_controller and self._ring_controller.is_active:
                     asyncio.ensure_future(self._process_ring_upload(audio))
                 else:
                     asyncio.ensure_future(self._process_and_respond(audio))
 
     def _should_finalize_early(self, stream: UploadStream) -> bool:
-        if self._vad_silence_ms <= 0:
+        silence_ms = (
+            self._ring_vad_silence_ms if self._ring_mode else self._vad_silence_ms
+        )
+        min_duration = (
+            self._ring_min_duration_s if self._ring_mode else self._min_duration_s
+        )
+        if silence_ms <= 0:
             return False
         if not stream.had_speech:
             return False
-        if stream.duration_s() < self._min_duration_s:
+        if stream.duration_s() < min_duration:
             return False
-        return stream.silence_ms() >= self._vad_silence_ms
+        return stream.silence_ms() >= silence_ms
+
+    def _in_post_ring_quiet(self) -> bool:
+        return time.monotonic() < self._post_ring_quiet_until
+
+    async def _handle_ring_dismiss(self, source: str) -> None:
+        if not self._ring_controller or not self._ring_controller.is_active:
+            log.debug("Dismiss ring ignorato (%s, allarme non attivo)", source)
+            return
+        log.info("Dismiss sveglia (%s)", source)
+        self._ring_controller.notify_dismiss_local(source)
+        await self.stop_ring()
 
     async def _process_ring_upload(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16 or not self._ring_controller:
             return
-        text = await self._pipeline.transcribe_only(audio_pcm16)
-        if not text:
+        if not self._ring_controller.is_active:
+            log.debug("Upload ring ignorato (allarme già chiuso)")
             return
-        log.info("Ring listen ASR → '%s'", text)
-        self._ring_controller.notify_dismiss_from_asr(text)
+
+        duration_s = len(audio_pcm16) / (ESP32_SAMPLE_RATE * 2)
+        if duration_s < 0.25:
+            log.info("Ring upload troppo corto (%.2f s), ignoro", duration_s)
+            return
+        audio_norm = normalize_pcm16(audio_pcm16)
+        async with self._process_lock:
+            text = ""
+            for attempt, pcm in enumerate((audio_pcm16, audio_norm), start=1):
+                text = await self._pipeline.transcribe_ring_dismiss(pcm)
+                log.info(
+                    "Ring listen ASR [try %d] → %r (%.2f s, %d byte)",
+                    attempt,
+                    text,
+                    duration_s,
+                    len(pcm),
+                )
+                mins = self._ring_controller.notify_snooze_from_asr(text)
+                if mins is not None:
+                    await self.stop_ring()
+                    msg = f"Ok, ti risveglio tra {mins} minuti."
+                    ack_pcm = await asyncio.to_thread(
+                        self._pipeline._synthesize_phrase, msg
+                    )
+                    await self._send_audio_response(ack_pcm, push=True)
+                    return
+                if self._ring_controller.notify_dismiss_from_asr(text):
+                    await self.stop_ring()
+                    return
+            if text:
+                log.info("Ring ASR non riconosciuto come dismiss: %r", text)
 
     async def _process_and_respond(self, audio_pcm16: bytes) -> None:
         if not audio_pcm16:
             log.warning("Upload stream vuoto, ignorato")
             return
+        # Durante il cooldown post-sveglia ignora solo eco breve del dismiss,
+        # non bloccare dialogo normale dopo wake word.
+        if self._in_post_ring_quiet():
+            duration_s = len(audio_pcm16) / (ESP32_SAMPLE_RATE * 2)
+            if duration_s < 1.2:
+                log.info(
+                    "Ignoro upload breve post-sveglia (%.2f s, cooldown)",
+                    duration_s,
+                )
+                return
 
         async with self._process_lock:
+            session = self._session_id
             try:
                 result = await self._pipeline.process(audio_pcm16)
             except Exception as e:
@@ -285,16 +410,25 @@ class AudioServer:
                 )
                 result = PipelineResult(response_pcm, listen_again=False)
 
+        if session != self._session_id:
+            log.info("Risposta obsoleta (sessione %d, corrente %d), scartata", session, self._session_id)
+            return
+
+        if result.audio:
             await self._send_audio_response(result.audio)
-            if result.listen_again:
+            if result.listen_again and not self._in_post_ring_quiet():
                 await self._send_control(PKT_LISTEN_AGAIN)
                 log.info("Richiesto ascolto ripetizione → ESP32 (no wake word)")
+            elif result.listen_again:
+                log.info("LISTEN_AGAIN soppresso (cooldown post-sveglia)")
 
     async def _send_audio_response(self, audio_pcm16: bytes, *, push: bool = False) -> None:
         if self._transport is None:
             return
 
         dest = self._reply_addr or self._esp32_addr
+        self._speaking = True
+        self._abort_playback.clear()
 
         chunk_samples = 512
         chunk_bytes = chunk_samples * 2
@@ -310,7 +444,11 @@ class AudioServer:
                 (total_packets - max_packets) * chunk_duration_s,
             )
 
+        aborted = False
         for offset in range(0, len(audio_pcm16), chunk_bytes):
+            if self._abort_playback.is_set():
+                aborted = True
+                break
             chunk = audio_pcm16[offset : offset + chunk_bytes]
             is_last = (offset + chunk_bytes) >= len(audio_pcm16)
             pkt_type = PKT_END_RESPONSE if is_last else PKT_RESPONSE
@@ -319,11 +457,16 @@ class AudioServer:
             seq = (seq + 1) & 0x7FFF
             await asyncio.sleep(chunk_duration_s)
 
-        duration_s = len(audio_pcm16) / (2 * ESP32_SAMPLE_RATE)
-        log.info(
-            "Risposta audio inviata a %s: %d byte (%.1f s @ %d Hz)",
-            dest,
-            len(audio_pcm16),
-            duration_s,
-            ESP32_SAMPLE_RATE,
-        )
+        if aborted:
+            await self._send_control(PKT_ABORT_PLAYBACK)
+            log.info("Riproduzione TTS interrotta (abort)")
+        else:
+            duration_s = len(audio_pcm16) / (2 * ESP32_SAMPLE_RATE)
+            log.info(
+                "Risposta audio inviata a %s: %d byte (%.1f s @ %d Hz)",
+                dest,
+                len(audio_pcm16),
+                duration_s,
+                ESP32_SAMPLE_RATE,
+            )
+        self._speaking = False

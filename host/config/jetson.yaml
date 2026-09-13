@@ -1,4 +1,8 @@
-# Jetson Orin Nano 8GB – Whisper CPU, LLM GPU (evita OOM memoria condivisa)
+# Jetson Orin — solo STT Parakeet (nano-parakeet) via karen-parakeet-asr.service :9000
+# TOPGRO: asr.riva.http_url → http://192.168.1.96:9000/v1/audio/transcriptions
+#
+# Setup: bash scripts/setup_nano_parakeet_jetson.sh
+# Nota Orin NX/Nano 8GB: PyTorch OOM su CUDA → device cpu (Parakeet TDT 0.6b)
 
 platform: jetson
 

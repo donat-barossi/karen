@@ -38,6 +38,6 @@ CONFIG_PARTITION_TABLE_OFFSET=0x8000
 # Legge il modello dalla flash (partizione "model")
 CONFIG_MODEL_IN_FLASH=y
 
-# Seleziona "Hey Kira" (WakeNet9 TTS3) – foneticamente simile a "Hey Karen"
-CONFIG_SR_WN_WN9_HEYKIRA_TTS3=y
+# Seleziona "Jarvis" (WakeNet9) – meno falsi positivi in conversazioni italiane rispetto a Hey Kira
+CONFIG_SR_WN_WN9_JARVIS_TTS=y
 

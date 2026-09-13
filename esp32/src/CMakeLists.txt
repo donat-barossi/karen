@@ -6,6 +6,7 @@ idf_component_register(
         "wake_word.cpp"
         "udp_transport.cpp"
         "status_led.c"
+        "remote_log.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         esp-sr

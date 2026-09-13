@@ -1,4 +1,8 @@
-# Karen – configurazione condivisa (tutte le piattaforme)
+# Jarvis – configurazione condivisa (tutte le piattaforme)
+
+assistant:
+  name: Jarvis
+  greeting: "Ciao! Sono Jarvis, come posso aiutarti?"
 
 transport:
   listen_host: "0.0.0.0"
@@ -7,7 +11,10 @@ transport:
   esp32_port: 7002
   upload_stream:
     vad_threshold: 300
-    vad_silence_ms: 600     # chiudi upload e processa prima dell'END ESP (RX già armato)
+    vad_silence_ms: 800     # margine silenzio; END ESP ha priorità se arriva dopo
+    ring_vad_silence_ms: 250  # VAD più rapido durante dismiss sveglia
+    ring_min_duration_s: 0.2  # accetta "stop" breve
+    post_ring_quiet_s: 1.5    # sopprime solo eco breve post-dismiss
     min_duration_s: 0.5
 
 ha:
@@ -20,19 +27,32 @@ ha:
     alarm: input_datetime.karen_alarm
     active: input_boolean.karen_active
     announce_script: script.karen_announce
+    media_player: media_player.hd_audio_generic_alc897_analog_hw_10  # es. MA Local Audio Out
+
+music:
+  media_player: media_player.hd_audio_generic_alc897_analog_hw_10
+  player_name: "casa"
+  content_type: music
   calendar:
     entity_id: calendar.outlook   # dopo integrazione Outlook in HA
     reminder_minutes: 15
 
 asr:
+  backend: whisper          # whisper | riva (Parakeet NIM locale)
   model_path: "whisper-small-ct2"
   language: "it"
   task: "transcribe"
   beam_size: 3
   vad_filter: false
   condition_on_previous_text: false
-  # Prompt neutro: esempi di comandi causavano allucinazioni ASR ("Sveglia alle sette").
   initial_prompt: "Conversazione in italiano con un assistente vocale domestico."
+  riva:
+    mode: local_http
+    language_code: multi
+    http_url: http://127.0.0.1:9000/v1/audio/transcriptions
+    server: 127.0.0.1:50051
+    fallback_whisper: true
+    timeout_s: 60
 
 llm:
   model_path: "phi3-mini-4k-q4_k_m.gguf"
@@ -45,21 +65,25 @@ llm:
   top_p: 0.9
 
 tts:
-  model_path: "it_IT-paola-medium.onnx"
-  config_path: "it_IT-paola-medium.onnx.json"
+  model_path: "it_IT-giorgio-medium.onnx"
+  config_path: "it_IT-giorgio-medium.onnx.json"
   sample_rate: 22050
-  length_scale: 1.0
+  length_scale: 0.85
+  noise_scale: 0.65
+  noise_w_scale: 0.8
   use_cuda: false
 
 weather:
-  latitude: 45.4654
-  longitude: 9.1859
-  timezone: "Europe/Rome"
+  latitude: 41.6488
+  longitude: -0.8891
+  default_city: "Zaragoza"   # usato in risposta quando non si chiede una città
+  timezone: "Europe/Madrid"
   offline_fallback: true
 
 logging:
   level: "INFO"
   file: null              # systemd scrive già su host/karen.log
+  esp32_file: "esp32.log" # log persistenti ESP32 (wake, stati, Wi-Fi, errori TX)
 
 schedule:
   data_dir: "data"        # host/data/schedules.json (timer e sveglie multipli)
@@ -68,3 +92,6 @@ schedule:
 
 pipeline:
   clarify_max_retries: 2
+
+robustness:
+  esp_silence_warn_s: 120   # warning se ESP non manda UDP per N secondi

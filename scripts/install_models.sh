@@ -55,18 +55,18 @@ else
     echo "      ✓ Phi-3 Mini scaricato"
 fi
 
-# ── 3. Piper – voce italiana paola-medium ─────────────────────────────────────
-echo "[3/3] Piper TTS – voce it_IT-paola-medium…"
-PIPER_ONNX="$MODELS_DIR/it_IT-paola-medium.onnx"
-PIPER_JSON="$MODELS_DIR/it_IT-paola-medium.onnx.json"
-PIPER_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/it/it_IT/paola/medium"
+# ── 3. Piper – voce italiana Giorgio (Jarvis) ───────────────────────────────
+echo "[3/3] Piper TTS – voce it_IT-giorgio-medium…"
+PIPER_ONNX="$MODELS_DIR/it_IT-giorgio-medium.onnx"
+PIPER_JSON="$MODELS_DIR/it_IT-giorgio-medium.onnx.json"
+GIORGIO_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/it/it_IT/giorgio/medium"
 
 if [ -f "$PIPER_ONNX" ] && [ -f "$PIPER_JSON" ]; then
     echo "      → già presente, skip."
 else
-    wget -q --show-progress "$PIPER_BASE/it_IT-paola-medium.onnx"     -O "$PIPER_ONNX"
-    wget -q --show-progress "$PIPER_BASE/it_IT-paola-medium.onnx.json" -O "$PIPER_JSON"
-    echo "      ✓ Piper voce italiana scaricata"
+    wget -q --show-progress "$GIORGIO_BASE/it_IT-giorgio-medium.onnx" -O "$PIPER_ONNX"
+    wget -q --show-progress "$GIORGIO_BASE/it_IT-giorgio-medium.onnx.json" -O "$PIPER_JSON"
+    echo "      ✓ Piper voce Giorgio scaricata"
 fi
 
 echo ""

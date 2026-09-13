@@ -36,6 +36,16 @@ for _ in $(seq 1 30); do
         echo "  systemctl --user status karen-${PROFILE}"
         echo "  systemctl --user restart karen-${PROFILE}"
         echo "  tail -f ${ROOT}/karen.log"
+        echo "  tail -f ${ROOT}/esp32.log"
+        echo
+        LINGER=$(loginctl show-user "${USER}" -p Linger --value 2>/dev/null || echo "no")
+        if [ "$LINGER" = "yes" ]; then
+            echo "✓ Linger abilitato: Karen resta attiva senza sessione SSH."
+        else
+            echo "⚠ LINGER NON ABILITATO — Karen si ferma quando chiudi SSH!"
+            echo "  Esegui una tantum: sudo loginctl enable-linger ${USER}"
+            echo "  oppure: bash ${ROOT}/scripts/enable_boot.sh ${PROFILE}"
+        fi
         echo
         echo "Per avvio automatico al boot (una tantum, richiede sudo):"
         echo "  sudo loginctl enable-linger ${USER}"

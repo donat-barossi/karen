@@ -45,3 +45,4 @@ echo "  2. cp host/config.yaml.example host/config.local.yaml   # token HA, IP E
 echo "  3. export KAREN_PROFILE=topgro"
 echo "  4. cd host && ../host/venv/bin/python main.py"
 echo "  5. bash host/scripts/install_systemd.sh topgro"
+echo "  6. sudo loginctl enable-linger \$USER   # Karen attiva anche senza SSH"

@@ -1,10 +1,11 @@
 # Karen – Guida di Deploy Reale (testata)
 
 > **Nota (2026):** Parti di questo documento descrivono il primo prototipo (INMP441, PSRAM disabilitata, trigger BOOT).  
-> Per lo **stato attuale** (Waveshare, wake word Hey Kira, streaming UDP, systemd) usa:
+> Per lo **stato attuale** (Waveshare, wake word «Jarvis», host TOPGRO, streaming UDP, systemd + linger) usa:
 > - [setup-guide.md](setup-guide.md)
 > - [testing-and-debug.md](testing-and-debug.md)
 > - [hardware-wiring.md](hardware-wiring.md)
+> - [topgro-migration.md](topgro-migration.md)
 
 ---
 
@@ -302,8 +303,9 @@ python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('Systran/faster-whisper-small', local_dir='models/whisper-small-ct2')
 "
-wget -P models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx
-wget -P models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx.json
+# Voce TTS attuale: Giorgio (maschile, Jarvis). Paola era la voce del prototipo.
+wget -P models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/giorgio/medium/it_IT-giorgio-medium.onnx
+wget -P models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/giorgio/medium/it_IT-giorgio-medium.onnx.json
 wget -P models/ https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/Phi-3-mini-4k-instruct-Q4_K_M.gguf \
      -O models/phi3-mini-4k-q4_k_m.gguf
 ```

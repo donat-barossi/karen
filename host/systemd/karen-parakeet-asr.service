@@ -1,0 +1,19 @@
+[Unit]
+Description=Karen Parakeet ASR HTTP (TOPGRO, nano-parakeet CPU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/donat/karen/host
+Environment=PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/home/donat/.local/lib:/usr/local/cuda/lib64
+Environment=PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/donat/karen/host/venv/bin/python scripts/parakeet_asr_server.py --host 127.0.0.1 --port 9000 --device cpu
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/donat/karen/host/parakeet-asr.log
+StandardError=append:/home/donat/karen/host/parakeet-asr.log
+
+[Install]
+WantedBy=default.target

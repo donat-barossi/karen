@@ -1,98 +1,116 @@
-# Test e debug della pipeline Karen
+# Test e debug della pipeline Jarvis
 
-Guida operativa per verificare ogni livello del sistema: ESP32 → UDP → Jetson (ASR → LLM → TTS) → UDP → speaker.
+Guida operativa per verificare ogni livello: ESP32 → UDP → host AI (ASR → LLM → TTS) → UDP → speaker.
 
 ## Architettura attuale (riepilogo)
 
 | Nodo | IP esempio | Ruolo |
 |------|------------|-------|
-| ESP32-S3 Waveshare | 192.168.1.89 | Wake word, mic, speaker, UDP |
-| Jetson Orin Nano | 192.168.1.96 | Pipeline AI |
-| Mini PC HA | 192.168.1.67 | Home Assistant (timer, luci, meteo) |
+| ESP32-S3 Waveshare | 192.168.1.89 | Wake word «Jarvis», mic, speaker, UDP |
+| **TOPGRO** (host principale) | 192.168.1.33 | Pipeline AI (CUDA) |
+| Jetson Orin Nano (fallback) | 192.168.1.96 | Pipeline AI (CPU ASR) |
+| Mini PC HA | 192.168.1.67 | Home Assistant |
 
-**Porte UDP:** ESP→Jetson **7001**, Jetson→ESP **7002**  
-**Audio:** PCM 16-bit mono **16 kHz** (ESP e risposta TTS resample a 16 kHz)
+**Porte UDP:** ESP → host **7001**, host → ESP **7002**  
+**Audio:** PCM 16-bit mono **16 kHz**
 
 ---
 
 ## Checklist rapida end-to-end
 
-Prima di un test vocale completo, verifica in ordine:
-
 ```bash
-# 1. Jetson: servizio attivo e porta in ascolto
-ssh donat@192.168.1.96 'systemctl --user is-active karen-jetson; ss -ulnp | grep 7001'
+# 1. Host TOPGRO: linger, servizio, porta
+ssh donat@192.168.1.33 '
+  loginctl show-user donat -p Linger
+  systemctl --user is-active karen-topgro
+  ss -ulnp | grep 7001
+'
 
-# 2. ESP32: ping e log serial
+# 2. ESP32 raggiungibile
 ping -c 2 192.168.1.89
 
-# 3. Rete: firewall non blocca UDP 7001/7002
-# (sul Jetson di solito non serve ufw se tutto in LAN)
+# 3. Log host in tempo reale
+ssh donat@192.168.1.33 'tail -f ~/karen/host/karen.log'
 ```
 
-Poi sul ESP32: **"Hey Kira"** → comando in italiano (es. *"Che ore sono?"*).
+Poi sull’ESP: **«Jarvis»** → comando (es. *«Che ore sono?»*).
 
 ---
 
-## Livello 1 – Solo pipeline Jetson (senza ESP32)
+## Problema frequente: wake word sì, risposta no
 
-Utile per isolare ASR, LLM, TTS e skills.
+**Sintomo:** l’ESP accende il LED / entra in ascolto, ma Jarvis non parla. Spesso dopo ore/giorni senza usare SSH.
 
-### Prerequisiti
+**Causa:** Karen (`karen-topgro.service`) **non è in esecuzione**. Il servizio è `systemctl --user` e con **`Linger=no`** si ferma quando chiudi l’ultima sessione SSH.
 
-```bash
-cd jetson
-cp config.yaml.example config.yaml   # se non esiste già
-# Modifica IP/token HA in config.yaml
-bash scripts/start_karen.sh          # oppure: python3 main.py
-```
-
-Modelli in `jetson/models/` (non in git): Whisper, Phi-3, Piper.  
-Vedi `scripts/install_models.sh`.
-
-### Test da testo (bypass ASR)
-
-Testa LLM + skills + TTS senza audio:
+**Verifica:**
 
 ```bash
-cd /path/to/karen
-python3 scripts/test_pipeline.py --text "che ore sono"
-python3 scripts/test_pipeline.py --text "che tempo fa oggi"
-python3 scripts/test_pipeline.py --text "accendi le luci del salotto"
+ssh donat@192.168.1.33 '
+  loginctl show-user donat -p Linger
+  journalctl --user -u karen-topgro --since today | tail -5
+  ss -ulnp | grep 7001 || echo "PORTA 7001 CHIUSA"
+'
 ```
 
-Output atteso: intent JSON, risposta italiana, file `/tmp/karen_response.wav`.
+Cerca nel journal:
 
-### Test pipeline completa con WAV
+```
+Stopped karen-topgro.service    # logout SSH senza linger
+Started karen-topgro.service    # nuovo login SSH
+```
 
-Registra un WAV **mono 16 kHz 16-bit** (o converti con ffmpeg):
+**Fix permanente:**
 
 ```bash
-ffmpeg -i mia_prova.m4a -ar 16000 -ac 1 -sample_fmt s16 test.wav
-python3 scripts/test_pipeline.py --audio test.wav
+sudo loginctl enable-linger donat
+systemctl --user restart karen-topgro
 ```
 
-Log attesi sul Jetson:
+I log ESP (`esp32.log`) mostrano `wake detected` anche con host spento — vengono scritti **solo quando Karen è attiva** (riceve UDP `PKT_TYPE_LOG`).
+
+---
+
+## Livello 1 – Solo pipeline host (senza ESP32)
+
+```bash
+cd host
+cp ../host/config.yaml.example config.local.yaml
+export KAREN_PROFILE=topgro
+bash scripts/start_karen.sh          # oppure: venv/bin/python main.py
+```
+
+Modelli in `host/models/`. Vedi `scripts/install_models.sh`.
+
+### Test da testo
+
+```bash
+python3 scripts/test_pipeline.py --profile topgro --text "che ore sono"
+python3 scripts/test_pipeline.py --profile topgro --text "quali sono le mie sveglie"
+python3 scripts/test_pipeline.py --profile topgro --text "qual è la mia prossima sveglia"
+```
+
+### Test con WAV
+
+```bash
+ffmpeg -i prova.m4a -ar 16000 -ac 1 -sample_fmt s16 test.wav
+python3 scripts/test_pipeline.py --profile topgro --audio test.wav
+```
+
+Log attesi:
 
 ```
 ASR → 'che ore sono'  (X.XX s)
 Fast-path intent=time  (X.XX s)
 Skill → '...'  (X.XX s)
 TTS → N campioni @ 16000 Hz  (X.XX s)
-Pipeline totale: X.XX s
-```
-
-### Test interattivo
-
-```bash
-python3 scripts/test_pipeline.py --interactive
 ```
 
 ---
 
-## Livello 2 – Transport UDP Jetson
+## Livello 2 – Transport UDP
 
-Con Karen in esecuzione, simula l'ESP32 inviando pacchetti KARN:
+Con Karen in esecuzione, simula l’ESP32:
 
 ```bash
 python3 - <<'PY'
@@ -102,25 +120,23 @@ def pkt(t, seq, payload=b""):
     return struct.pack(">IBBh", MAGIC, t, 0, seq) + payload
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-jetson = ("192.168.1.96", 7001)
+host = ("192.168.1.33", 7001)
 pcm = b"\x00\x01" * 512
-sock.sendto(pkt(0x01, 0, pcm), jetson)
+sock.sendto(pkt(0x01, 0, pcm), host)
 time.sleep(0.05)
-sock.sendto(pkt(0x02, 0), jetson)  # END_AUDIO
+sock.sendto(pkt(0x02, 0), host)
 print("Inviato END_AUDIO")
 PY
 ```
 
-Log Jetson attesi:
+Log attesi:
 
 ```
 Inizio upload stream da ('...', ...)
-Upload stream chiuso (END): ...
+Upload stream chiuso ...
 ASR → ...
 Risposta audio inviata a ('192.168.1.89', 7002): ...
 ```
-
-Se non compare `Inizio upload stream`, il servizio non è in ascolto o c’è un firewall.
 
 ---
 
@@ -131,7 +147,7 @@ Se non compare `Inizio upload stream`, il servizio non è in ascolto o c’è un
 ```bash
 cd esp32
 cp src/config.h.example src/config.h
-# Imposta WIFI_SSID, WIFI_PASS, JETSON_IP
+# WIFI_SSID, WIFI_PASS, KAREN_HOST_IP
 
 ~/.karen-pio-venv/bin/pio run -t upload --upload-port /dev/ttyACM0
 ```
@@ -142,69 +158,90 @@ cp src/config.h.example src/config.h
 ~/.karen-pio-venv/bin/pio device monitor --port /dev/ttyACM0 --baud 115200
 ```
 
-### Sequenza log normale (happy path)
+### Sequenza log normale
 
 ```
-I karen_main: >>> Karen! Ascolto…
-I udp_transport: RX risposta armato
-I karen_main: Fine registrazione (silenzio=…, tot=…)
+I karen_main: >>> Jarvis! Ascolto…
+I karen_main: Fine registrazione ...
 I karen_main: Riproduzione risposta (stream)…
-I karen_main: Stream avviato (seq=0)
-I karen_main: Stream finito: seq 0..N, riprodotti=N, validi=N
 I karen_main: Risposta terminata
 ```
 
-### Log utili per il debug
+### Log remoti (persistiti su host)
 
-| Log ESP32 | Significato |
+File: `~/karen/host/esp32.log`
+
+| Messaggio | Significato |
 |-----------|-------------|
-| `udp_transport: Task TX UDP avviato` | Upload verso Jetson con pacing 32 ms |
-| `udp_transport: Coda TX piena` | Jetson lento o Wi-Fi congestionato |
-| `Timeout attesa prima risposta Jetson` | Jetson non risponde / non in ascolto |
-| `Skip seq=N (gap)` | Pacchetti UDP persi in downlink |
-| `Recovery → IDLE` | Supervisor ha resettato uno stato bloccato |
+| `ready ww=wn9_jarvis_tts build=…` | Firmware e soglia wake |
+| `wake detected` | WakeNet ha triggerato |
+| `wake rejected cooldown/ambient` | Wake scartato (gate/cooldown) |
+| `wake afe reinit` | Recovery motore wake post-TTS |
+| `HB … mic_rms=N` | Heartbeat; RMS microfono in IDLE |
+| `state 0->1->2->3->0` | IDLE → ascolto → attesa → TTS → IDLE |
 
 ---
 
-## Livello 4 – Jetson in produzione
-
-### Avvio e restart
+## Livello 4 – Host in produzione (TOPGRO)
 
 ```bash
-# Servizio utente (consigliato)
-systemctl --user start karen-jetson
-systemctl --user restart karen-jetson
-systemctl --user status karen-jetson
-
-# Log
-tail -f ~/karen/jetson/karen.log
+systemctl --user status karen-topgro
+systemctl --user restart karen-topgro
+tail -f ~/karen/host/karen.log
+tail -f ~/karen/host/esp32.log
+journalctl --user -u karen-topgro -f
 ```
 
-Installazione servizio (prima volta):
+Installazione (prima volta):
 
 ```bash
-bash jetson/scripts/install_systemd.sh
-# Boot automatico senza login:
+bash host/scripts/install_systemd.sh topgro
 sudo loginctl enable-linger $USER
 ```
 
-### Log pipeline per fase
+### Log pipeline
 
 | Messaggio | Fase |
 |-----------|------|
-| `Upload stream: X.X s ricevuti` | Ricezione streaming ESP→Jetson |
-| `Upload stream chiuso (VAD Jetson)` | Fine utterance anticipata (700 ms silenzio) |
-| `Upload stream chiuso (END)` | Fine da pacchetto END ESP |
-| `ASR → '...'` | Trascrizione Whisper |
+| `Server UDP in ascolto su 0.0.0.0:7001` | Host pronto |
+| `Upload stream: X.X s ricevuti` | Audio ESP → host |
+| `Rule fast-path intent=alarm` | Sveglie/timer senza LLM |
+| `ASR → '...'` | Trascrizione Whisper o Parakeet locale |
+
+### Test Parakeet ASR (solo locale su Jetson)
+
+Nessun dato inviato al cloud NVIDIA: il modello gira in Docker sul Jetson.
+
+```bash
+# Sul Jetson (192.168.1.96)
+export NGC_API_KEY=...   # solo per pull immagine da nvcr.io
+bash scripts/setup_riva_parakeet_jetson.sh
+
+pip install nvidia-riva-client requests
+ffmpeg -y -f alsa -i ... -t 5 -ar 16000 -ac 1 /tmp/prova.wav
+python scripts/test_asr_backends.py --audio /tmp/prova.wav
+```
+
+Per usare Parakeet in Karen sul Jetson, in `config.local.yaml`:
+
+```yaml
+asr:
+  backend: riva
+  riva:
+    mode: local_http
+    http_url: http://127.0.0.1:9000/v1/audio/transcriptions
+    fallback_whisper: true
+```
+
+TOPGRO può chiamare Parakeet sul Jetson via LAN (`http://192.168.1.96:9000/...`) senza cloud.
+Torna a Whisper: `asr.backend: whisper`.
 | `Fast-path intent=...` | Comando frequente senza LLM |
 | `LLM → '...'` | Risposta modello |
-| `Skill → '...'` | Esecuzione skill (HA, meteo, …) |
-| `TTS → N campioni` | Sintesi Piper |
-| `Risposta audio inviata` | Downlink UDP in tempo reale |
+| `Skill → '...'` | Skill (HA, meteo, sveglie…) |
+| `TTS → N campioni` | Piper Giorgio |
+| `Risposta audio inviata` | Downlink UDP |
 
-### Debug verbose
-
-In `jetson/config.yaml`:
+Debug verbose in `host/config/base.yaml`:
 
 ```yaml
 logging:
@@ -213,21 +250,17 @@ logging:
 
 ---
 
-## Livello 5 – Test end-to-end completo
+## Livello 5 – Test end-to-end
 
-1. Avvia Jetson (`systemctl --user status karen-jetson` → `active`)
-2. Monitor ESP32 + log Jetson in parallelo:
+1. Verifica host: `systemctl --user is-active karen-topgro` → `active`
+2. Log paralleli:
 
 ```bash
-# Terminale 1
-ssh donat@192.168.1.96 'tail -f ~/karen/jetson/karen.log'
-
-# Terminale 2
-~/.karen-pio-venv/bin/pio device monitor --port /dev/ttyACM0 --baud 115200
+ssh donat@192.168.1.33 'tail -f ~/karen/host/karen.log ~/karen/host/esp32.log'
 ```
 
-3. Di' **"Hey Kira"** → **"Che ore sono?"**
-4. Verifica latenza totale (~10–25 s su Orin Nano: ASR CPU + LLM GPU + TTS)
+3. Di' **«Jarvis»** → **«Che ore sono?»**
+4. Latenza TOPGRO tipica: ~2–8 s (ASR+LLM su GPU)
 
 ---
 
@@ -235,20 +268,18 @@ ssh donat@192.168.1.96 'tail -f ~/karen/jetson/karen.log'
 
 | Sintomo | Dove guardare | Azione |
 |---------|---------------|--------|
-| Jetson non riceve nulla | `ss -ulnp \| grep 7001` | `systemctl --user restart karen-jetson` |
-| ASR vuoto / "Non ho capito" | Log `ASR → ''` | Verifica mic ESP; `vad_filter: false` in config |
-| Risposta in inglese | Log LLM | Controlla `task: transcribe`, fast-path italiano |
-| Audio ESP spezzato | Log `Skip seq=` | Jetson invia in tempo reale (32 ms/pkt); Wi-Fi |
-| ESP boot loop | Serial `alloc coda TX fallita` | Firmware aggiornato (coda TX in PSRAM) |
-| Nessun audio ESP | Manca `Stream avviato` | Verifica IP Jetson in `config.h`, porta 7002 |
-| HA non agisce | Log skill | Token HA in `config.yaml` |
-| OOM Jetson | dmesg / crash | Whisper su CPU, LLM GPU; riduci `n_gpu_layers` |
+| Wake sì, risposta no | `ss -ulnp \| grep 7001`, linger | `enable-linger`, restart servizio |
+| Host non riceve UDP | Porta 7001 chiusa | `systemctl --user restart karen-topgro` |
+| ASR vuoto | Log `ASR → ''` | Mic ESP; `vad_filter: false` |
+| LLM inventa intent | Log `Intent LLM non valido` | Aggiorna host; fast-path sveglie |
+| Audio ESP spezzato | Log `Skip seq=` | Wi-Fi; host lento |
+| Wake intermittente | `esp32.log` senza `wake detected` | Reflash ESP; soglia in `config.h` |
+| HA non agisce | Log skill | Token in `config.local.yaml` |
 
-### Verifica connettività UDP
+### Connettività UDP
 
 ```bash
-# Dal PC di sviluppo (sostituisci IP)
-nc -u -vz 192.168.1.96 7001
+nc -u -vz 192.168.1.33 7001
 ```
 
 ---
@@ -257,14 +288,8 @@ nc -u -vz 192.168.1.96 7001
 
 | Comando | Scopo |
 |---------|--------|
-| `scripts/test_pipeline.py` | Test Jetson senza ESP |
-| `jetson/scripts/start_karen.sh` | Avvio con LD_LIBRARY_PATH CUDA |
-| `jetson/scripts/install_systemd.sh` | Servizio systemd utente |
-| `scripts/publish_karen_repo.sh` | Push su GitHub |
-
----
-
-## Prossimo passo: TOPGRO (gaming PC)
-
-La migrazione della pipeline dal Jetson al PC TOPGRO (GTX 1650) è in corso sul branch `feature/topgro`.  
-Obiettivo: Whisper + LLM su GPU x86, stesso protocollo UDP verso ESP32.
+| `scripts/test_pipeline.py` | Test host senza ESP |
+| `host/scripts/start_karen.sh` | Avvio manuale con CUDA paths |
+| `host/scripts/install_systemd.sh topgro` | Servizio systemd utente |
+| `host/scripts/enable_boot.sh topgro` | Abilita linger al boot |
+| `~/.karen-pio-venv/bin/pio run -t upload` | Flash firmware ESP |

@@ -26,7 +26,7 @@ Componenti audio integrati:
 | I2S DIN | 15 | ES7210 → ESP32 (microfono) |
 | I2S DOUT | 16 | ESP32 → ES8311 (speaker) |
 | BOOT | 0 | Pulsante trigger fallback |
-| WS2812 RGB | 38 | 7 LED (non usati dal firmware Karen) |
+| WS2812 RGB | 38 | 7 LED (non usati dal firmware Jarvis) |
 
 ### Indirizzi I2C
 
@@ -60,7 +60,7 @@ Componenti audio integrati:
                               │ UDP Wi-Fi
                               ▼
                     ┌─────────────────────────────┐
-                    │     Jetson Orin Nano        │
+                    │   TOPGRO / Jetson (host/)   │
                     │  Whisper → LLM → Piper TTS  │
                     └─────────────────────────────┘
 ```

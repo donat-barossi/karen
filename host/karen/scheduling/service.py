@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -13,54 +14,18 @@ from zoneinfo import ZoneInfo
 from ..ha_client import HomeAssistantClient
 from ..scheduling.ringing import RingController
 from .store import ScheduleStore
+from .text_utils import (
+    DEFAULT_ALARM_NAME,
+    WEEKDAY_IT,
+    alarm_spoken_label,
+    fmt_days,
+    fmt_duration,
+    parse_weekdays,
+)
 
 log = logging.getLogger(__name__)
 
-WEEKDAY_IT = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
-
-DAY_ALIASES: dict[str, int] = {
-    "lun": 0, "lunedì": 0, "lunedi": 0,
-    "mar": 1, "martedì": 1, "martedi": 1,
-    "mer": 2, "mercoledì": 2, "mercoledi": 2,
-    "gio": 3, "giovedì": 3, "giovedi": 3,
-    "ven": 4, "venerdì": 4, "venerdi": 4,
-    "sab": 5, "sabato": 5,
-    "dom": 6, "domenica": 6,
-}
-
-
-def parse_weekdays(text: str) -> list[int] | None:
-    t = text.lower()
-    found: set[int] = set()
-    for key, wd in DAY_ALIASES.items():
-        if key in t:
-            found.add(wd)
-    if "feriali" in t:
-        found.update({0, 1, 2, 3, 4})
-    if "weekend" in t or "fine settimana" in t:
-        found.update({5, 6})
-    if "tutti i giorni" in t or "ogni giorno" in t:
-        return list(range(7))
-    return sorted(found) if found else None
-
-
-def fmt_duration(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds} secondi"
-    if seconds < 3600:
-        m, s = divmod(seconds, 60)
-        out = f"{m} minut{'o' if m == 1 else 'i'}"
-        return out + (f" e {s} secondi" if s else "")
-    h, rem = divmod(seconds, 3600)
-    m = rem // 60
-    out = f"{h} or{'a' if h == 1 else 'e'}"
-    return out + (f" e {m} minuti" if m else "")
-
-
-def fmt_days(days: list[int]) -> str:
-    return ", ".join(WEEKDAY_IT[d] for d in sorted(days))
-
-
+_AUTO_ALARM_NAME_RE = re.compile(r"^sveglia-\d+$", re.I)
 class ScheduleService:
     def __init__(self, cfg: dict) -> None:
         host_dir = Path(__file__).resolve().parent.parent.parent
@@ -71,6 +36,7 @@ class ScheduleService:
         self._ha_cfg = cfg.get("ha", {})
         self._voice_announce: Any = None
         self._ring_controller: RingController | None = None
+        self._active_ring_kind: str = ""
         self._task: asyncio.Task | None = None
         self._data = self._store.load()
 
@@ -182,11 +148,18 @@ class ScheduleService:
         *,
         name: str = "",
         alarm_id: str = "",
+        one_shot: bool = False,
     ) -> dict[str, Any]:
         if alarm_id:
             for alarm in self._data["alarms"]:
                 if alarm.get("id") == alarm_id:
-                    alarm.update({"hour": hour, "minute": minute, "days": days, "enabled": True})
+                    alarm.update({
+                        "hour": hour,
+                        "minute": minute,
+                        "days": days,
+                        "enabled": True,
+                        "one_shot": one_shot,
+                    })
                     if name:
                         alarm["name"] = name
                     self._persist()
@@ -194,17 +167,31 @@ class ScheduleService:
 
         alarm = {
             "id": uuid.uuid4().hex[:8],
-            "name": name or f"sveglia-{len(self._data['alarms']) + 1}",
+            "name": name or DEFAULT_ALARM_NAME,
             "hour": hour,
             "minute": minute,
             "days": sorted(set(days)),
             "enabled": True,
+            "one_shot": one_shot,
             "skip_dates": [],
             "last_fired": "",
         }
         self._data["alarms"].append(alarm)
         self._persist()
         return alarm
+
+    def one_shot_days(self, hour: int, minute: int) -> list[int]:
+        """Prossima occorrenza unica: oggi se l'orario non è passato, altrimenti domani."""
+        now = datetime.now(self._tz)
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if now < target:
+            return [now.weekday()]
+        return [(now + timedelta(days=1)).weekday()]
+
+    def one_shot_label(self, hour: int, minute: int) -> str:
+        now = datetime.now(self._tz)
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        return "oggi" if now < target else "domani"
 
     def list_alarms(self) -> list[dict[str, Any]]:
         return [a for a in self._data["alarms"] if a.get("enabled", True)]
@@ -248,23 +235,25 @@ class ScheduleService:
 
     def disable_alarm(self, alarm_id: str = "", name: str = "") -> bool:
         name_l = name.lower()
+        keep: list[dict[str, Any]] = []
+        removed = False
         for alarm in self._data["alarms"]:
-            if alarm_id and alarm.get("id") != alarm_id:
+            if alarm_id and alarm.get("id") == alarm_id:
+                removed = True
                 continue
-            if name_l and name_l not in alarm.get("name", "").lower():
+            if name_l and name_l in alarm.get("name", "").lower():
+                removed = True
                 continue
-            alarm["enabled"] = False
+            keep.append(alarm)
+        if removed:
+            self._data["alarms"] = keep
             self._persist()
-            return True
-        return False
+        return removed
 
     def disable_all_alarms(self) -> int:
-        count = 0
-        for alarm in self._data["alarms"]:
-            if alarm.get("enabled", True):
-                alarm["enabled"] = False
-                count += 1
+        count = sum(1 for alarm in self._data["alarms"] if alarm.get("enabled", True))
         if count:
+            self._data["alarms"] = []
             self._persist()
         return count
 
@@ -272,47 +261,102 @@ class ScheduleService:
         alarms = self.list_alarms()
         if not alarms:
             return "Non hai sveglie attive."
-        parts = [
-            f"{a.get('name', 'sveglia')}: {int(a['hour']):02d}:{int(a['minute']):02d} "
-            f"({fmt_days(a.get('days', []))})"
-            for a in alarms
-        ]
+        parts = []
+        for a in alarms:
+            when = f"{int(a['hour']):02d}:{int(a['minute']):02d}"
+            label = alarm_spoken_label(a.get("name", ""))
+            title = f"Sveglia {label}" if label else "Sveglia"
+            if a.get("one_shot"):
+                sched_label = self.one_shot_label(int(a["hour"]), int(a["minute"]))
+                parts.append(f"{title}: {when} ({sched_label}, una volta)")
+            else:
+                parts.append(f"{title}: {when} ({fmt_days(a.get('days', []))})")
         return "Sveglie: " + "; ".join(parts) + "."
 
-    def _next_occurrence(self, alarm: dict[str, Any], after: datetime) -> datetime | None:
+    def _relative_day_label(self, dt: datetime, now: datetime) -> str:
+        d = dt.date()
+        if d == now.date():
+            return "oggi"
+        if d == now.date() + timedelta(days=1):
+            return "domani"
+        return WEEKDAY_IT[d.weekday()]
+
+    def next_alarm_occurrence(
+        self, alarm: dict[str, Any], after: datetime | None = None
+    ) -> datetime | None:
+        now = after or datetime.now(self._tz)
         days = alarm.get("days", [])
         if not days:
             return None
         skips = set(alarm.get("skip_dates", []))
         hour, minute = int(alarm["hour"]), int(alarm["minute"])
-        for offset in range(1, 8):
-            day = after.date() + timedelta(days=offset)
+        for offset in range(0, 14):
+            day = now.date() + timedelta(days=offset)
             if day.weekday() not in days:
                 continue
             if day.isoformat() in skips:
                 continue
-            return datetime.combine(day, datetime.min.time(), tzinfo=self._tz).replace(
+            dt = datetime.combine(day, datetime.min.time(), tzinfo=self._tz).replace(
                 hour=hour, minute=minute
             )
+            if dt <= now:
+                continue
+            return dt
         return None
 
+    def describe_next_alarm(self) -> str:
+        alarms = self.list_alarms()
+        if not alarms:
+            return "Non hai sveglie attive."
+        now = datetime.now(self._tz)
+        best_dt: datetime | None = None
+        best_alarm: dict[str, Any] | None = None
+        for alarm in alarms:
+            dt = self.next_alarm_occurrence(alarm, now)
+            if dt is None:
+                continue
+            if best_dt is None or dt < best_dt:
+                best_dt = dt
+                best_alarm = alarm
+        if best_dt is None or best_alarm is None:
+            return "Non ho trovato prossime sveglie programmate."
+        when = f"{best_dt.hour:02d}:{best_dt.minute:02d}"
+        label = alarm_spoken_label(best_alarm.get("name", ""))
+        day_label = self._relative_day_label(best_dt, now)
+        if label:
+            return f"La prossima sveglia {label} suona {day_label} alle {when}."
+        return f"La prossima sveglia suona {day_label} alle {when}."
+
+    def _next_occurrence(self, alarm: dict[str, Any], after: datetime) -> datetime | None:
+        return self.next_alarm_occurrence(alarm, after)
+
     async def _start_ring(self, message: str, kind: str) -> None:
+        self._active_ring_kind = kind
         if self._ring_controller:
             asyncio.create_task(self._announce_ha(message))
             await self._ring_controller.start(message, kind=kind)
             return
         await self._announce(message)
 
+    def snooze_alarm(self, minutes: int = 5) -> bool:
+        """Durante squillo sveglia: richiama tra N minuti (timer interno)."""
+        if self._active_ring_kind != "alarm":
+            return False
+        mins = max(1, int(minutes))
+        self.start_timer(mins * 60, name="snooze")
+        log.info("Sveglia posticipata di %d min", mins)
+        return True
+
     async def _announce_ha(self, message: str) -> None:
         ha = HomeAssistantClient(self._ha_cfg)
         script = self._ha_cfg.get("entities", {}).get("announce_script", "script.karen_announce")
-        ok = await ha.call_service(
+        result = await ha.call_service(
             "script.turn_on",
             entity_id=script,
             message=message,
         )
-        if not ok:
-            await ha.call_service("persistent_notification.create", title="Karen", message=message)
+        if not result.ok:
+            await ha.call_service("persistent_notification.create", title="Jarvis", message=message)
         log.info("Annuncio HA: %s", message)
 
     async def _announce(self, message: str) -> None:
@@ -325,13 +369,13 @@ class ScheduleService:
 
         ha = HomeAssistantClient(self._ha_cfg)
         script = self._ha_cfg.get("entities", {}).get("announce_script", "script.karen_announce")
-        ok = await ha.call_service(
+        result = await ha.call_service(
             "script.turn_on",
             entity_id=script,
             message=message,
         )
-        if not ok:
-            await ha.call_service("persistent_notification.create", title="Karen", message=message)
+        if not result.ok:
+            await ha.call_service("persistent_notification.create", title="Jarvis", message=message)
         log.info("Annuncio HA: %s", message)
 
     async def _run_loop(self) -> None:
@@ -386,8 +430,18 @@ class ScheduleService:
             if alarm.get("last_fired") == today:
                 continue
             alarm["last_fired"] = today
-            self._persist()
-            await self._start_ring(
-                f"{alarm.get('name', 'Sveglia')}! È ora di svegliarsi.",
-                kind="alarm",
+            if alarm.get("one_shot"):
+                alarm["enabled"] = False
+            label = alarm_spoken_label(alarm.get("name", ""))
+            wake_msg = (
+                f"{label}! È ora di svegliarsi."
+                if label
+                else "Sveglia! È ora di svegliarsi."
             )
+            self._persist()
+            await self._start_ring(wake_msg, kind="alarm")
+            if alarm.get("one_shot"):
+                self._data["alarms"] = [
+                    a for a in self._data["alarms"] if a.get("id") != alarm.get("id")
+                ]
+                self._persist()

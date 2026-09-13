@@ -1,6 +1,6 @@
-# Karen – Timer, sveglie e calendario Outlook
+# Jarvis – Timer, sveglie e calendario Outlook
 
-## Cosa può fare Karen oggi
+## Cosa può fare Jarvis oggi
 
 | Comando vocale | Intent | Dove |
 |----------------|--------|------|
@@ -10,10 +10,14 @@
 | "Sveglia alle 7:30" | `alarm` (set) | Scheduler locale |
 | "Sveglia alle 7 lunedì mercoledì venerdì" | `alarm` (set, days) | Scheduler locale |
 | "Domani non suonare" | `alarm` (skip_tomorrow) | Salta una data senza cancellare la ricorrenza |
-| "Quali sveglie ho?" | `alarm` (list) | Scheduler locale |
+| "Quali sveglie ho?" / "Quali sono le mie sveglie?" | `alarm` (list) | Scheduler locale |
+| "Qual è la mia prossima sveglia?" | `alarm` (next) | Scheduler locale |
+| "Salta la prossima sveglia" | `alarm` (skip_next) | Scheduler locale |
 | "Cosa ho in calendario domani?" | `calendar_query` | Calendario Outlook via HA |
 | "Ricordami domani alle 15 riunione con Marco" | `reminder` | Crea evento in calendario |
 | "Aggiungi dentista venerdì alle 10" | `calendar_create` | Calendario Outlook |
+
+Le query su sveglie usano **fast-path a regole** (senza LLM) quando possibile.
 
 ---
 
@@ -67,43 +71,45 @@ Per TTS vocale sullo speaker:
 
 ## 4. Creare eventi vocalmente
 
-Karen usa `calendar.create_event` di Home Assistant:
+Jarvis usa `calendar.create_event` di Home Assistant:
 
 - Gli eventi creati vocalmente finiscono nel calendario Outlook sincronizzato (se HA ha permessi di scrittura)
 - Per promemoria brevi usa intent `reminder` (evento 15 min)
 
 Esempi:
 
-- *"Hey Kira, ricordami domani alle 15 la riunione con Marco"*
+- *"Jarvis, ricordami domani alle 15 la riunione con Marco"*
 - *"Aggiungi al calendario dentista venerdì alle 10"*
 
 ---
 
 ## 5. Sveglie e timer
 
-Timer e sveglie sono gestiti **localmente sul host Karen** (file `host/data/schedules.json`), non più limitati a una sola entity HA.
+Timer e sveglie sono gestiti **localmente sul host** (`host/data/schedules.json`), non limitati a una sola entity HA.
 
 ### Timer multipli
 
 - Puoi avviare più timer contemporaneamente (es. pasta + forno)
 - Comandi: *"timer di 5 minuti"*, *"annulla timer"*, *"annulla tutti i timer"*, *"quali timer ho?"*
-- Alla scadenza Karen annuncia via `script.karen_announce` in Home Assistant
+- Alla scadenza Jarvis annuncia via `script.karen_announce` in Home Assistant
 
 ### Allarme continuo e dismiss
 
 - Timer e sveglia fanno suonare **beeps alternati** sull'ESP (immediati, senza TTS)
 - Per fermare: *"stop"*, *"basta"*, *"si sono sveglio"* (senza wake word)
-- Con wake word: *"Hey Kira, stop"*
+- Con wake word: *"Jarvis, stop"*
 - Notifica testuale anche su Home Assistant
 
-### Sveglie ricorrenti
+### Sveglie ricorrenti e query
 
 - Più sveglie con giorni diversi, es.:
   - *"Sveglia alle 7 lunedì mercoledì e venerdì"*
   - *"Sveglia alle 8 martedì e giovedì"*
 - Giorni: 0=lunedì … 6=domenica (anche *feriali*, *weekend*, *tutti i giorni*)
-- *"Domani non suonare"* / *"Salta la sveglia domani"* → salta solo domani, la ricorrenza resta
-- *"Salta la prossima sveglia"* → salta la prossima occorrenza
+- *"Domani non suonare"* → salta solo domani, la ricorrenza resta
+- *"Salta la prossima sveglia"* → salta la prossima occorrenza (comando, non domanda)
+- *"Quali sono le mie sveglie?"* → elenco sveglie attive
+- *"Qual è la mia prossima sveglia?"* → prossima occorrenza (oggi/domani + ora)
 
 ### Annuncio in HA
 
@@ -123,10 +129,13 @@ KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
   --profile topgro --text "sveglia alle sette lunedì mercoledì e venerdì"
 
 KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
-  --profile topgro --text "domani non suonare la sveglia"
+  --profile topgro --text "quali sono le mie sveglie"
 
 KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
-  --profile topgro --text "annulla tutti i timer"
+  --profile topgro --text "qual è la mia prossima sveglia"
+
+KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
+  --profile topgro --text "domani non suonare la sveglia"
 
 KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
   --profile topgro --text "cosa ho in calendario domani"
@@ -136,6 +145,5 @@ KAREN_PROFILE=topgro host/venv/bin/python scripts/test_pipeline.py \
 
 ## Roadmap (non ancora implementato)
 
-- Sveglie one-shot con data specifica (senza ricorrenza)
 - Scrittura bidirezionale avanzata Outlook (serie, invitati)
 - Annuncio promemoria direttamente su ESP32 (oggi via HA)

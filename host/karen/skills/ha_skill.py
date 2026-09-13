@@ -7,8 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
-
+from ..ha_client import HomeAssistantClient, ha_action_error
 from .base import BaseSkill
 
 log = logging.getLogger(__name__)
@@ -49,34 +48,8 @@ class HomeAssistantSkill(BaseSkill):
             if key in params:
                 data[key] = params[key]
 
-        ok = await self._call_service(ha_cfg, service, data)
-        if ok:
+        ha = HomeAssistantClient(ha_cfg)
+        result = await ha.call_service(service, **data)
+        if result.ok:
             return response or "Fatto!"
-        else:
-            return "Non riesco a comunicare con Home Assistant. Controlla la connessione."
-
-    @staticmethod
-    async def _call_service(ha_cfg: dict, service: str, data: dict) -> bool:
-        domain, svc = service.split(".", 1)
-        url = f"{ha_cfg.get('url', '')}/api/services/{domain}/{svc}"
-        headers = {
-            "Authorization": f"Bearer {ha_cfg.get('token', '')}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url, json=data, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=ha_cfg.get("timeout_s", 5)),
-                ) as resp:
-                    if resp.status not in (200, 201):
-                        body = await resp.text()
-                        log.warning("HA %s → %d: %s", service, resp.status, body[:200])
-                        return False
-                    return True
-        except aiohttp.ClientConnectorError:
-            log.warning("HA non raggiungibile su %s", ha_cfg.get("url"))
-            return False
-        except Exception as e:
-            log.exception("HA call errore: %s", e)
-            return False
+        return ha_action_error("eseguire il comando", result)

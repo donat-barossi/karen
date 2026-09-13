@@ -1,6 +1,6 @@
 """
-Karen – TTS Engine
-Usa Piper (piper-tts) con voce italiana paola-medium.
+Jarvis – TTS Engine
+Piper con voce italiana maschile Giorgio (kirys79/piper_italiano).
 Output: PCM 16-bit mono al sample rate del modello (22050 Hz).
 """
 
@@ -58,7 +58,11 @@ class PiperTTS:
         from piper.config import SynthesisConfig
 
         syn_cfg = SynthesisConfig(
-            length_scale=self._cfg.get("length_scale", 1.0),
+            length_scale=float(self._cfg.get("length_scale", 1.0)),
+            noise_scale=float(self._cfg.get("noise_scale", 0.667)),
+            noise_w_scale=float(
+                self._cfg.get("noise_w_scale", self._cfg.get("noise_w", 0.8))
+            ),
         )
 
         # Raccoglie i chunk PCM int16 restituiti da synthesize()

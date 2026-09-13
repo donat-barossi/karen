@@ -6,11 +6,6 @@ import logging
 from typing import Any
 
 from .base import BaseSkill
-from .datetime_skill import DateTimeSkill
-from .timer_skill import TimerSkill, parse_alarm_time, parse_timer_duration
-from .weather_skill import WeatherSkill
-from .ha_skill import HomeAssistantSkill
-from .calendar_skill import CalendarSkill
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +31,19 @@ class SkillRegistry:
         self._skills: dict[str, BaseSkill] = {}
 
     async def initialize(self) -> None:
+        from .calendar_skill import CalendarSkill
+        from .datetime_skill import DateTimeSkill
+        from .ha_skill import HomeAssistantSkill
+        from .music_skill import MusicSkill
+        from .timer_skill import TimerSkill
+        from .weather_skill import WeatherSkill
+
         skills: list[BaseSkill] = [
             DateTimeSkill(self._cfg),
             TimerSkill(self._cfg),
             CalendarSkill(self._cfg),
             WeatherSkill(self._cfg),
+            MusicSkill(self._cfg),
             HomeAssistantSkill(self._cfg),
         ]
         for skill in skills:
@@ -52,12 +55,6 @@ class SkillRegistry:
     async def execute(self, intent_data: dict[str, Any]) -> str:
         """
         Esegue la skill appropriata e restituisce la risposta italiana.
-
-        Args:
-            intent_data: dizionario JSON dell'LLM
-
-        Returns:
-            Risposta in italiano da sintetizzare.
         """
         intent = intent_data.get("intent", "unknown")
         response_it = intent_data.get("response_it", "")
@@ -66,9 +63,6 @@ class SkillRegistry:
             log.warning("Risposta LLM in inglese ignorata: %s", response_it[:80])
             response_it = ""
             intent_data = {**intent_data, "response_it": ""}
-
-        # Se la skill ha già una risposta valida dal LLM, potrebbe usarla
-        # ma la skill può sovrascrivere con dati freschi (es. ora esatta, meteo)
 
         skill = self._skills.get(intent)
         if skill:
@@ -79,7 +73,6 @@ class SkillRegistry:
                 log.exception("Errore skill '%s': %s", intent, e)
                 return "Si è verificato un errore nell'esecuzione del comando."
 
-        # Nessuna skill specifica: usa la risposta del LLM come fallback
         if response_it and "[SKILL_WILL_FILL]" not in response_it:
             return response_it
 

@@ -12,9 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from karen.config_loader import load_config
+from karen.health import RuntimeWatchdog, run_startup_checks
 from karen.scheduling import RingController
 from karen.pipeline import KarenPipeline
 from karen.transport import AudioServer
+from karen.esp32_log import Esp32LogWriter
 
 
 def setup_logging(cfg: dict) -> None:
@@ -41,9 +43,17 @@ async def main() -> None:
     log = logging.getLogger("karen.main")
     log.info("=== Karen AI pipeline avvio (profilo: %s) ===", cfg.get("platform"))
 
+    run_startup_checks(cfg, host_dir)
+
+    esp32_log = Esp32LogWriter(cfg.get("logging", {}).get("esp32_file"), host_dir)
+    watchdog = RuntimeWatchdog(
+        esp_silence_warn_s=float(cfg.get("robustness", {}).get("esp_silence_warn_s", 120))
+    )
+
     pipeline = KarenPipeline(cfg)
     await pipeline.initialize()
 
+    process_lock = asyncio.Lock()
     transport_cfg = cfg["transport"]
     server = AudioServer(
         host=transport_cfg["listen_host"],
@@ -52,12 +62,17 @@ async def main() -> None:
         esp32_port=transport_cfg["esp32_port"],
         pipeline=pipeline,
         stream_cfg=transport_cfg.get("upload_stream"),
+        esp32_log=esp32_log,
+        watchdog=watchdog,
+        process_lock=process_lock,
     )
 
     ring = RingController(cfg)
     ring.attach_transport(server)
+    ring.set_schedule_service(pipeline._schedule)
     server.set_ring_controller(ring)
     pipeline.set_ring_controller(ring)
+    pipeline.set_transport(server)
 
     async def voice_announce(message: str) -> None:
         pcm = await asyncio.to_thread(pipeline._synthesize_phrase, message)
@@ -74,10 +89,14 @@ async def main() -> None:
     )
 
     try:
-        await server.serve_forever()
+        await asyncio.gather(
+            asyncio.create_task(server.serve_forever()),
+            asyncio.create_task(watchdog.run()),
+        )
     except KeyboardInterrupt:
         log.info("Arresto in corso…")
     finally:
+        esp32_log.close()
         await pipeline.shutdown()
 
 

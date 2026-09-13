@@ -103,6 +103,34 @@ class WhisperASR:
         log.debug("ASR detected_language=%s, text='%s'", info.language, text)
         return text
 
+    def transcribe_ring_dismiss(self, audio_pcm16: bytes) -> str:
+        """Trascrizione breve per dismiss sveglia (senza trim silenzio)."""
+        if self._model is None:
+            raise RuntimeError("Modello ASR non caricato. Chiama load() prima.")
+
+        audio_np = np.frombuffer(audio_pcm16, dtype=np.int16).astype(np.float32) / 32768.0
+        peak = float(np.max(np.abs(audio_np))) if len(audio_np) else 0.0
+        if peak > 0 and peak < 0.05:
+            gain = 0.5 / peak
+            audio_np = np.clip(audio_np * gain, -1.0, 1.0)
+        duration_s = len(audio_np) / SAMPLE_RATE
+        log.debug("ASR ring: %.2f s (%d byte)", duration_s, len(audio_pcm16))
+
+        kwargs: dict[str, Any] = {
+            "language": self._cfg.get("language", "it"),
+            "task": "transcribe",
+            "beam_size": 1,
+            "vad_filter": False,
+            "initial_prompt": None,
+            "condition_on_previous_text": False,
+            "temperature": 0.0,
+            "without_timestamps": True,
+        }
+        segments, info = self._model.transcribe(audio_np, **kwargs)
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        log.debug("ASR ring detected_language=%s, text='%s'", info.language, text)
+        return text
+
     def transcribe(self, audio_pcm16: bytes) -> str:
         """Trascrive audio PCM 16-bit mono 16kHz in italiano."""
         try:

@@ -3,7 +3,7 @@
 // Copia come config.h e modifica SSID/password Wi-Fi.
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Karen – ESP32-S3 Firmware Configuration
+//  Jarvis – ESP32-S3 Firmware Configuration (repo: karen)
 //  Waveshare ESP32-S3 AI Smart Speaker Development Board (ESP32-S3-AUDIO-Board)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -51,31 +51,41 @@
 #define MAX_RESPONSE_PKTS   2048
 
 // ── Wake word ────────────────────────────────────────────────────────────────
-#define WAKEWORD_MODEL_NAME "wn9_heykira_tts3"
-#define WAKE_MIC_GAIN_DB        42.0f
-#define WAKENET_THRESHOLD       0.52f
-#define WAKENET_DET_MODE        3
+#define WAKEWORD_MODEL_NAME "wn9_jarvis_tts"
+#define WAKE_MIC_GAIN_DB        46.0f
+#define WAKENET_THRESHOLD       0.65f   /* più alto = meno falsi positivi (range 0.4–0.99) */
+#define WAKENET_DET_MODE        3       /* 2 = 2CH normal; 3 = 2CH aggressive (meno falsi) */
 #define WAKE_MIC_SWAP_CHANNELS  0
+/** Gate ambiente: rifiuta wake se rumore di fondo alto (TV). 0 = disabilitato. */
+#define WAKE_AMBIENT_GATE_RMS   1200
+#define WAKE_AMBIENT_TRACK_MAX  750
+#define WAKE_REJECT_COOLDOWN_MS 2500
+#define WAKE_POST_TTS_MS        450
 
 // ── VAD – rilevamento fine frase ─────────────────────────────────────────────
-#define VAD_SPEECH_THRESHOLD    700
+#define VAD_SPEECH_THRESHOLD    500
 #define VAD_SILENCE_THRESHOLD   380
 #define VAD_SILENCE_MS          1000
 #define VAD_MIN_SPEECH_MS       350
-#define VAD_MAX_RECORD_MS       4500
+#define VAD_MAX_RECORD_MS       8000
+#define LISTEN_WARMUP_MS        450
 
 #define RESPONSE_FIRST_TIMEOUT_MS  90000
 #define RESPONSE_CHUNK_TIMEOUT_MS  3000
 #define STREAM_GAP_TIMEOUT_MS      100
 
 #define UDP_TX_QUEUE_DEPTH      160
-#define UDP_TX_PACE_MS          32
+#define UDP_TX_PACE_MS          0
 
 #define STATE_LISTENING_MAX_MS     (VAD_MAX_RECORD_MS + 5000)
 #define STATE_WAITING_MAX_MS       120000
 #define STATE_SPEAKING_MAX_MS      180000
 #define STATE_RINGING_MAX_MS       1800000
-#define RING_LISTEN_MS             5000
+#define STATE_RINGING_STUCK_MS     90000
+#define RING_BEEP_GAP_MS           1800
+#define RING_LISTEN_MS             3500
+#define RING_SPEECH_THRESHOLD      950
+#define RING_SILENCE_THRESHOLD     550
 #define MIC_FAIL_RECOVER_COUNT     8
 #define SUPERVISOR_INTERVAL_MS     200
 
@@ -90,6 +100,8 @@
 #define WAKE_LED_CHASE_TAIL   3
 #define WAKE_LED_CHASE_MS     90
 
+#define LISTEN_NO_SPEECH_IDLE_MS  8000
+
 #define PACKET_MAGIC            0x4B41524E
 #define PKT_TYPE_AUDIO          0x01
 #define PKT_TYPE_END_AUDIO      0x02
@@ -99,3 +111,11 @@
 #define PKT_TYPE_START_RING     0x06
 #define PKT_TYPE_STOP_RING      0x07
 #define PKT_TYPE_LISTEN_AGAIN   0x08
+#define PKT_TYPE_RING_DISMISS   0x09
+#define PKT_TYPE_LOG            0x0A
+#define PKT_TYPE_ABORT_PLAYBACK 0x0B
+
+/** Intervallo heartbeat remoto verso host (ms). */
+#define REMOTE_LOG_HEARTBEAT_MS 60000
+/** Lunghezza massima riga log UDP. */
+#define REMOTE_LOG_MAX_LEN      220

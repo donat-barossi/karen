@@ -1,0 +1,45 @@
+# Music Assistant — server standalone (per Home Assistant Container, SENZA Add-on)
+#
+# Avvio ( dalla cartella barossi-home sul Mini PC ):
+#   cd ~/repos/barossi-home/media-music-assistant
+#   docker compose up -d
+#
+# UI: http://192.168.1.67:8095
+# Poi in HA: Impostazioni → Dispositivi e servizi → Aggiungi integrazione → Music Assistant
+# URL: http://127.0.0.1:8095  (HA usa network_mode: host come questo container)
+
+services:
+  alsa-init:
+    image: debian:bookworm-slim
+    container_name: music-assistant-alsa-init
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - "29"
+    volumes:
+      - ./scripts/alsa-init.sh:/alsa-init.sh:ro
+    entrypoint: ["/bin/bash", "/alsa-init.sh"]
+    restart: "no"
+
+  music-assistant-server:
+    image: ghcr.io/music-assistant/server:latest
+    container_name: music-assistant-server
+    restart: unless-stopped
+    depends_on:
+      alsa-init:
+        condition: service_completed_successfully
+    network_mode: host
+    volumes:
+      - ./data:/data
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - "29"   # gruppo audio dell'host (getent group audio)
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/Rome

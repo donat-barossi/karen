@@ -58,8 +58,37 @@ def prepare_text_for_tts(text: str) -> str:
         t = pattern.sub(repl, t)
 
     t = re.sub(r"(\d+)\s*-\s*(\d+)\s*grammi", r"circa \1 grammi", t, flags=re.I)
+    t = _normalize_time_for_tts(t)
+    t = _soften_pauses_for_speech(t)
     t = re.sub(r"\s{2,}", " ", t)
     return t.strip()
+
+
+def _soften_pauses_for_speech(text: str) -> str:
+    """Frasi brevi: virgole al posto dei punti intermedi (pause più corte in Piper)."""
+    t = text.strip()
+    if len(t) > 200:
+        return t
+    parts = [p.strip().rstrip(".!?") for p in re.split(r"(?<=[.!?])\s+", t) if p.strip()]
+    if len(parts) <= 1:
+        return t
+    merged: list[str] = []
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+        if i < len(parts) - 1:
+            merged.append(part + ",")
+        else:
+            merged.append(part + ".")
+    return " ".join(merged)
+
+
+def _normalize_time_for_tts(text: str) -> str:
+    """Orario: ':' o ' e ' tra ore e minuti → virgola (pausa più breve)."""
+    t = text
+    t = re.sub(r"(?i)\bsono le (\d{1,2}) e (\d{1,2})\b", r"sono le \1,\2", t)
+    t = re.sub(r"(\d{1,2}):(\d{2})", r"\1,\2", t)
+    return t
 
 
 def split_sentences(text: str) -> list[str]:

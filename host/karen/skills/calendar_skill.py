@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from ..ha_client import HomeAssistantClient
+from ..ha_client import HaCallResult, HomeAssistantClient, ha_action_error
 from .base import BaseSkill
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,9 @@ class CalendarSkill(BaseSkill):
         start, end = ha.day_range(when)
         events = await ha.get_calendar_events(entity_id, start, end)
 
+        if events is None:
+            return HaCallResult.failure("unreachable").user_message
+
         if not events:
             label = "oggi" if when in ("today", "oggi") else when
             return f"Non hai eventi in calendario per {label}."
@@ -77,20 +80,20 @@ class CalendarSkill(BaseSkill):
         *,
         is_reminder: bool,
     ) -> str:
-        title = params.get("title") or params.get("summary") or "Promemoria Karen"
+        title = params.get("title") or params.get("summary") or "Promemoria Jarvis"
         start = self._parse_event_start(ha, params)
         duration_min = int(params.get("duration_min", 30 if not is_reminder else 15))
         end = start + timedelta(minutes=duration_min)
 
-        ok = await ha.create_calendar_event(
+        result = await ha.create_calendar_event(
             entity_id=entity_id,
             summary=title,
             start=start,
             end=end,
-            description=params.get("description", "Creato da Karen"),
+            description=params.get("description", "Creato da Jarvis"),
         )
-        if not ok:
-            return "Non riesco a salvare l'evento nel calendario."
+        if not result.ok:
+            return ha_action_error("salvare l'evento nel calendario", result)
 
         when = start.strftime("%d/%m alle %H:%M")
         if is_reminder:

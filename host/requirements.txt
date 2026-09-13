@@ -9,6 +9,7 @@
 # faster-whisper dipende da ctranslate2.
 # Su Jetson il wheel PyPI è CPU-only: per CUDA vedi scripts/install_ctranslate2_cuda.sh
 faster-whisper==1.0.3
+# Parakeet ASR locale (Jetson Docker): pip install nvidia-riva-client requests
 # NON aggiungere ctranslate2 qui: verrebbe reinstallato il wheel CPU da PyPI
 
 # ── LLM ───────────────────────────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+[Unit]
+Description=Karen FastConformer IT ASR HTTP (TOPGRO, ONNX CPU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/donat/karen/host
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/donat/karen/host/venv/bin/python scripts/fastconformer_asr_server.py --host 127.0.0.1 --port 9000
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/donat/karen/host/fastconformer-asr.log
+StandardError=append:/home/donat/karen/host/fastconformer-asr.log
+
+[Install]
+WantedBy=default.target

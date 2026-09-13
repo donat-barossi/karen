@@ -13,6 +13,9 @@ esp_err_t udp_transport_init(void);
 
 bool udp_send_audio(const int16_t *audio_pcm16, size_t samples, uint16_t seq);
 bool udp_send_end_of_audio(void);
+/** Attende svuotamento coda TX (prima di END sincrono). */
+void udp_wait_tx_drain(uint32_t timeout_ms);
+bool udp_send_ring_dismiss(void);
 
 /** Reset buffer per una nuova risposta audio dal Jetson. */
 void udp_response_reset(void);
@@ -44,6 +47,10 @@ bool udp_push_play_pending(void);
 void udp_push_play_clear(void);
 bool udp_listen_again_pending(void);
 void udp_listen_again_clear(void);
+bool udp_playback_abort_pending(void);
+
+bool udp_send_log_line(const char *line);
+uint32_t udp_get_tx_fail_count(void);
 
 void udp_transport_deinit(void);
 

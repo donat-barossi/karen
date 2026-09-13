@@ -18,6 +18,9 @@ extern "C" {
  */
 esp_err_t wake_word_init(void);
 
+/** Ricrea l'AFE da zero (recovery dopo TTS / wake bloccato). */
+esp_err_t wake_word_reinit(void);
+
 /**
  * Alimenta l'AFE con un frame audio e controlla se il wake word è rilevato.
  * La dimensione del frame richiesta è quella restituita da get_feed_chunksize();
@@ -39,6 +42,9 @@ void wake_word_reset(void);
  */
 void wake_word_set_active(bool active);
 
+/** true se feed+fetch AFE sono attivi (wake word in ascolto). */
+bool wake_word_is_active(void);
+
 /**
  * Restituisce il numero di campioni per frame richiesto dall'AFE.
  * Chiamare DOPO wake_word_init().
@@ -54,6 +60,9 @@ void wake_word_deinit(void);
  * Restituisce il nome del modello wake word in uso.
  */
 const char *wake_word_get_model_name(void);
+
+/** Tag build firmware wake (per verifica flash remota). */
+const char *wake_word_get_build_tag(void);
 
 #ifdef __cplusplus
 }

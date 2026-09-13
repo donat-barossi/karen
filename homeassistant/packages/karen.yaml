@@ -51,6 +51,32 @@ script:
       #     message: "{{ message }}"
       #     media_player_entity_id: media_player.salotto
 
+  karen_play_music:
+    alias: "Karen – Riproduci musica"
+    fields:
+      query:
+        description: "Ricerca (brano, artista, album, genere)"
+        example: "Gli anni Max Pezzali"
+      search_type:
+        description: "track | artist | album | genre"
+        example: "track"
+      media_player:
+        description: "Entity ID player (default: music_assistant)"
+        example: "media_player.hd_audio_generic_alc897_analog_hw_10"
+    sequence:
+      - service: media_player.play_media
+        target:
+          entity_id: "{{ media_player | default('media_player.hd_audio_generic_alc897_analog_hw_10') }}"
+        data:
+          media_content_id: >-
+            {% set q = query | default('') %}
+            {% set t = search_type | default('track') %}
+            {% if t == 'album' %}album:{{ q }}
+            {% elif t == 'artist' %}artist:{{ q }}
+            {% elif t == 'genre' %}genre:{{ q }}
+            {% else %}{{ q }}{% endif %}
+          media_content_type: music
+
 automation:
   - id: karen_timer_expired
     alias: "Karen – Timer scaduto"

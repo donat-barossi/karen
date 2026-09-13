@@ -6,7 +6,8 @@ import logging
 import re
 from typing import Any
 
-from ..scheduling.service import ScheduleService, fmt_days, fmt_duration, parse_weekdays
+from ..asr_fix import fix_asr_transcript
+from ..scheduling.text_utils import parse_weekdays
 from .base import BaseSkill
 
 log = logging.getLogger(__name__)
@@ -24,12 +25,12 @@ _NUM_WORD = (
     r"undici|dodici|quindici|venti|trenta|quaranta|cinquanta|sessanta"
 )
 
-_ALARM_KW = re.compile(r"\bsvegl\w*", re.I)
-_CANCEL_ALARM_VERBS = (
-    "annulla", "annull", "a nulla", "anulla", "cancella", "disattiva",
-    "elimina", "ferma", "stop", "togli", "rimuovi",
+_ALARM_KW = re.compile(r"\b(?:svegl\w*|spegl\w*)\b", re.I)
+_CANCEL_ALARM_RE = re.compile(
+    r"\b(?:annulla|annull|cancella|disattiva|elimina|ferma|stop|togli|rimuovi)\b",
+    re.I,
 )
-_TIME_INTRO = r"(?:alle|per le|ore|alle ore)\s*"
+_TIME_INTRO = r"(?:alle|per le|ore|alle ore|a\s+)\s*"
 _ITALIAN_HOUR_WORDS: dict[str, int] = {
     "una": 1, "uno": 1, "due": 2, "tre": 3, "quattro": 4,
     "cinque": 5, "sei": 6, "sette": 7, "otto": 8, "nove": 9,
@@ -72,6 +73,9 @@ class TimerSkill(BaseSkill):
         return self._sched
 
     async def execute(self, intent_data: dict[str, Any]) -> str:
+        from ..scheduling.service import ScheduleService
+        from ..scheduling.text_utils import alarm_spoken_label, fmt_days, fmt_duration
+
         intent = intent_data.get("intent")
         params = intent_data.get("parameters", {})
 
@@ -114,6 +118,9 @@ class TimerSkill(BaseSkill):
             if action in ("list", "status", "query"):
                 return sched.describe_alarms()
 
+            if action == "next":
+                return sched.describe_next_alarm()
+
             if action in ("skip_tomorrow", "skip"):
                 n = sched.skip_tomorrow(params.get("alarm_id", ""))
                 if n == 0:
@@ -148,21 +155,37 @@ class TimerSkill(BaseSkill):
             hour = int(params["hour"])
             minute = int(params.get("minute", 0))
             days = params.get("days")
-            if isinstance(days, list) and days:
-                day_list = [int(d) for d in days]
+            one_shot = bool(params.get("one_shot"))
+            if isinstance(days, list) and days == list(range(7)) and not one_shot:
+                if not params.get("recurring") and not params.get("every_day"):
+                    one_shot = True
+                    days = None
+
+            if one_shot or not days:
+                day_list = sched.one_shot_days(hour, minute)
+                one_shot = True
             else:
-                day_list = list(range(7))
+                day_list = [int(d) for d in days]
 
             alarm = sched.upsert_alarm(
                 hour, minute, day_list,
                 name=params.get("name", ""),
                 alarm_id=params.get("alarm_id", ""),
+                one_shot=one_shot,
             )
             when = f"{hour:02d}:{minute:02d}"
-            return (
-                f"Sveglia {alarm['name']} impostata per le {when}, "
-                f"{fmt_days(day_list)}."
-            )
+            spoken = alarm_spoken_label(alarm.get("name", ""))
+            if one_shot:
+                label = sched.one_shot_label(hour, minute)
+                if spoken:
+                    return f"Sveglia {spoken} impostata per le {when} di {label}."
+                return f"Sveglia impostata per le {when} di {label}."
+            if spoken:
+                return (
+                    f"Sveglia {spoken} impostata per le {when}, "
+                    f"{fmt_days(day_list)}."
+                )
+            return f"Sveglia impostata per le {when}, {fmt_days(day_list)}."
 
         return intent_data.get("response_it", "Comando non riconosciuto.")
 
@@ -193,9 +216,14 @@ def parse_timer_duration(text: str) -> int | None:
 
 
 def parse_alarm_time(text: str) -> tuple[int, int] | None:
-    t = text.lower()
+    t = fix_asr_transcript(text.lower())
     if not _ALARM_KW.search(t) or _looks_like_alarm_echo(t):
         return None
+
+    if "mezzogiorno" in t:
+        return 12, 0
+    if "mezzanotte" in t:
+        return 0, 0
 
     m = re.search(r"(\d{1,2})[:.](\d{2})", t)
     if m:
@@ -204,6 +232,13 @@ def parse_alarm_time(text: str) -> tuple[int, int] | None:
     m = re.search(r"(\d{1,2})\s*(?:e mezza|e trenta)", t)
     if m:
         return int(m.group(1)), 30
+
+    m = re.search(rf"{_TIME_INTRO}(\d{{1,2}})\s+(\d{{1,2}})\b", t)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
 
     m = re.search(rf"{_TIME_INTRO}(\d{{1,2}})(?:\s*(?:e\s*)?(\d{{2}}))?", t)
     if m:
@@ -229,24 +264,67 @@ def parse_alarm_time(text: str) -> tuple[int, int] | None:
     return None
 
 
+_ALARM_QUERY_RE = re.compile(
+    r"\b(?:quali|qual\s*[eè]|che|quando|dimmi|mostra|elenco|lista|"
+    r"qual\s*ora|a\s*che\s*ora|che\s*ora|quale)\b",
+    re.I,
+)
+_SKIP_NEXT_RE = re.compile(
+    r"\b(?:salta|annulla|disattiva|non\s+suonare|rimanda)\b.*\b(?:prossim[ao]|successiv[ao])\b|"
+    r"\b(?:prossim[ao]|successiv[ao])\b.*\b(?:salta|annulla|non\s+suonare)\b|"
+    r"\bsalta\s+(?:la\s+)?prossim",
+    re.I,
+)
+
+
+def _parse_alarm_query_action(text: str) -> str | None:
+    """Ritorna 'list', 'next' o None se non è una domanda sulle sveglie."""
+    if not _ALARM_KW.search(text):
+        return None
+    if not _ALARM_QUERY_RE.search(text) and not re.search(
+        r"\b(?:attive|impostate|programmate|ci\s+sono)\b", text
+    ):
+        if not re.search(r"\b(?:mie|mio|mia)\s+svegl", text):
+            return None
+    if re.search(r"\b(?:prossim[ao]|successiv[ao])\b", text):
+        return "next"
+    if re.search(r"\bsveglie\b", text):
+        return "list"
+    if re.search(r"\b(?:quali|elenco|lista|mostra|attive|impostate)\b", text):
+        return "list"
+    if re.search(r"\bmie?\s+svegl", text):
+        return "list"
+    return "next"
+
+
 def parse_alarm_intent(text: str) -> dict[str, Any] | None:
-    t = text.lower()
+    t = fix_asr_transcript(text.lower())
     if _looks_like_alarm_echo(t):
         return None
 
-    if _ALARM_KW.search(t) and any(v in t for v in _CANCEL_ALARM_VERBS):
-        cancel_all = any(w in t for w in ("tutte", "tutti", "svegl"))
+    query_action = _parse_alarm_query_action(t)
+    if query_action:
+        return {"intent": "alarm", "parameters": {"action": query_action}}
+
+    if _ALARM_KW.search(t) and _CANCEL_ALARM_RE.search(t):
+        cancel_all = bool(re.search(r"\b(?:tutte|tutti)\b", t))
         return {"intent": "alarm", "parameters": {"action": "cancel", "all": cancel_all}}
+
+    if re.search(r"\b(?:tutte|tutti)\b", t) and re.search(r"\bsvegl", t) and re.search(
+        r"\b(?:rimuovi|cancella|annulla|elimina|disattiva|togli)\b", t
+    ):
+        return {"intent": "alarm", "parameters": {"action": "cancel", "all": True}}
 
     if any(p in t for p in ("domani non suonare", "non suonare domani", "salta domani", "salta la sveglia domani")):
         return {"intent": "alarm", "parameters": {"action": "skip_tomorrow"}}
 
-    if any(p in t for p in ("salta prossima", "prossima sveglia", "salta la prossima")):
+    if _SKIP_NEXT_RE.search(t):
         return {"intent": "alarm", "parameters": {"action": "skip_next"}}
 
     if any(p in t for p in (
         "quali sveglie", "mostra sveglie", "sveglie attive",
         "che sveglie", "che sveglia", "sveglie impostate", "sveglie ci sono",
+        "le mie sveglie", "mie sveglie",
     )):
         return {"intent": "alarm", "parameters": {"action": "list"}}
 
@@ -254,7 +332,7 @@ def parse_alarm_intent(text: str) -> dict[str, Any] | None:
     if time is None:
         return None
     hour, minute = time
-    days = parse_weekdays(t) or list(range(7))
+    days = parse_weekdays(t)
     name = ""
     if "lavoro" in t or "feriali" in t:
         name = "feriali"
@@ -262,14 +340,23 @@ def parse_alarm_intent(text: str) -> dict[str, Any] | None:
         name = "lun-mer-ven"
     elif days == [1, 3]:
         name = "mar-gio"
-    return {
-        "intent": "alarm",
-        "parameters": {"action": "set", "hour": hour, "minute": minute, "days": days, "name": name},
+    params: dict[str, Any] = {
+        "action": "set",
+        "hour": hour,
+        "minute": minute,
+        "name": name,
     }
+    if days is not None:
+        params["days"] = days
+        if "tutti i giorni" in t or "ogni giorno" in t:
+            params["every_day"] = True
+    else:
+        params["one_shot"] = True
+    return {"intent": "alarm", "parameters": params}
 
 
 def parse_timer_intent(text: str) -> dict[str, Any] | None:
-    t = text.lower()
+    t = fix_asr_transcript(text.lower())
     if any(p in t for p in ("annulla timer", "cancella timer", "ferma timer", "stop timer")):
         cancel_all = "tutti" in t
         return {"intent": "timer", "parameters": {"action": "cancel", "all": cancel_all}}

@@ -1,11 +1,19 @@
 # TOPGRO gaming PC – GTX 1650 4GB
-# Whisper su CPU (16 core x86, veloce); LLM su GPU. CUDA ASR va in OOM se LLM già in VRAM.
+# ASR FastConformer IT CPU locale; LLM su GPU.
+# Setup: bash scripts/setup_fastconformer_topgro.sh && systemctl --user enable --now karen-fastconformer-asr
 
 platform: topgro
 
 asr:
+  backend: riva
   device: cpu
   compute_type: int8
+  riva:
+    mode: local_http
+    language_code: it
+    http_url: http://127.0.0.1:9000/v1/audio/transcriptions
+    fallback_whisper: true
+    timeout_s: 30
 
 tts:
   use_cuda: false
